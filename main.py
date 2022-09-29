@@ -88,7 +88,6 @@ while True:
 
             still_rgb = cv2.drawMarker(still_rgb, p[0][0].astype(np.int64), (255, 0, 255), cv2.MARKER_CROSS, 50, 4)
 
-
         cv2.imshow(selected_camera.window_name, still_rgb)
         cv2.waitKey()
 
