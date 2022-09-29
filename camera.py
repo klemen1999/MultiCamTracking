@@ -3,6 +3,8 @@ import blobconverter
 import cv2
 from calibrator import Calibrator
 import time
+import numpy as np
+from typing import List
 
 class Camera:
     label_map = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
@@ -23,12 +25,13 @@ class Camera:
         self.nn_queue = self.device.getOutputQueue(name="nn", maxSize=1, blocking=False)
         self.depth_queue = self.device.getOutputQueue(name="depth", maxSize=1, blocking=False)
 
-        self.window_name = f"[{self.friendly_id}] Camera {self.mxid}"
+        self.window_name = f"[{self.friendly_id}] Camera - mxid: {self.mxid}"
         if show_video:
             cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(self.window_name, 1280, 720)
+            cv2.resizeWindow(self.window_name, 640, 360)
 
         self.frame_rgb = None 
+        self.detected_objects: List[np.ndarray] = []
 
         self.calibrator = Calibrator((10, 7), 0.0251, device_info)
 
@@ -77,7 +80,7 @@ class Camera:
         spatial_nn.setBlobPath(blobconverter.from_zoo(name='mobilenet-ssd', shaves=6))
         spatial_nn.setConfidenceThreshold(0.5)
         spatial_nn.input.setBlocking(False)
-        spatial_nn.setBoundingBoxScaleFactor(0.5)
+        spatial_nn.setBoundingBoxScaleFactor(0.2)
         spatial_nn.setDepthLowerThreshold(100)
         spatial_nn.setDepthUpperThreshold(5000)
         xout_nn = pipeline.create(dai.node.XLinkOut)
@@ -123,7 +126,8 @@ class Camera:
         self.frame_rgb = in_rgb.getCvFrame()
 
         visualization = self.frame_rgb.copy()
-        visualization = cv2.resize(visualization, (1280, 720), interpolation = cv2.INTER_NEAREST)
+        # visualization = depth_frame_color.copy()
+        visualization = cv2.resize(visualization, (640, 360), interpolation = cv2.INTER_NEAREST)
 
         height = visualization.shape[0]
         width  = visualization.shape[1]
@@ -132,6 +136,7 @@ class Camera:
         if in_nn is not None:
             detections = in_nn.detections
 
+        self.detected_objects = []
         if len(detections) > 0:
             roi_datas = self.mapping_queue.get().getConfigData()
 
@@ -154,6 +159,17 @@ class Camera:
                     label = self.label_map[detection.label]
                 except:
                     label = detection.label
+
+                # show only people
+                if label != 'person':
+                    continue
+                
+                if self.calibrator.cam_to_world is not None:
+                    pos_camera_frame = np.array([[detection.spatialCoordinates.x / 1000, -detection.spatialCoordinates.y / 1000, detection.spatialCoordinates.z / 1000, 1]]).T
+                    # pos_camera_frame = np.array([[0, 0, detection.spatialCoordinates.z/1000, 1]]).T
+                    pos_world_frame = self.calibrator.cam_to_world @ pos_camera_frame
+
+                    self.detected_objects.append(pos_world_frame)
 
                 cv2.rectangle(visualization, (xmin, ymin), (xmax, ymax), (100, 0, 0), 2)
                 cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)

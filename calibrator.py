@@ -23,8 +23,9 @@ class Calibrator:
         self.distortion_coef = None
         self.rot_vec = None
         self.trans_vec = None
-        self.worldToCam = None
-        self.camToWorld = None
+        self.world_to_cam = None
+        self.cam_to_world = None
+        self.position = None
 
         self.load_calibration_from_file()
 
@@ -99,14 +100,15 @@ class Calibrator:
         )
 
         rotM = cv2.Rodrigues(rvec)[0]
-        self.worldToCam = np.vstack((np.hstack((rotM, tvec)), np.array([0,0,0,1])))
-        self.camToWorld = np.linalg.inv(self.worldToCam)
+        self.world_to_cam = np.vstack((np.hstack((rotM, tvec)), np.array([0,0,0,1])))
+        self.cam_to_world = np.linalg.inv(self.world_to_cam)
+        self.position = (self.cam_to_world @ np.array([[0,0,0,1]]).T)[:3]
 
         print("POSE ESTIMATION DONE")
         print("ret: ", ret)
         print("Rotation vector : \n", rvec)
         print("Translation vector : \n", tvec)
-        print("Camer to World transformation matrix : \n", self.camToWorld)
+        print("Camer to World transformation matrix : \n", self.cam_to_world)
 
         self.rot_vec = rvec
         self.trans_vec = tvec

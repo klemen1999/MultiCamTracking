@@ -74,10 +74,10 @@ while True:
             if camera is selected_camera:
                 continue
 
-            if camera.calibrator.camToWorld is None:
+            if camera.calibrator.cam_to_world is None:
                 continue
 
-            camera_position = (camera.calibrator.camToWorld @ np.array([[0,0,0,1]]).T)[:3]
+            camera_position = (camera.calibrator.cam_to_world @ np.array([[0,0,0,1]]).T)[:3]
 
             print(camera_position)
             p = cv2.projectPoints(
@@ -94,6 +94,35 @@ while True:
     if key == ord('q'):
         break
 
+    birds_eye_view = np.zeros([512,512,3],dtype=np.uint8)
+
+    cv2.line(birds_eye_view, (256, 256), (256+30, 256), (0, 0, 255), 2)
+    cv2.line(birds_eye_view, (256, 256), (256, 256+30), (0, 255, 0), 2)
+
     for camera in cameras:
         camera.update()
+        colors = [(0,0,255), (0,255,0), (255,0,0)]
+        try:
+            color = colors[camera.friendly_id - 1]
+        except:
+            color = (255,255,255)
+
+        if camera.calibrator.position is not None:
+            p = camera.calibrator.position.flatten()[:2]*100 + np.array([256,256])
+            cv2.circle(birds_eye_view, p.astype(np.int64), 5, color, -1)
+
+            p_z = (camera.calibrator.cam_to_world @ np.array([[0,0,0.6,1]]).T)[:3]
+            p_z = p_z.flatten()[:2]*100 + np.array([256,256])
+            cv2.line(birds_eye_view, p.astype(np.int64), p_z.astype(np.int64), color, 2)
+
+            p_x = (camera.calibrator.cam_to_world @ np.array([[0.3,0,0,1]]).T)[:3]
+            p_x = p_x.flatten()[:2]*100 + np.array([256,256])
+            cv2.line(birds_eye_view, p.astype(np.int64), p_x.astype(np.int64), color, 2)
+
+
+        for o in camera.detected_objects:
+            p = o.flatten()[:2]*100 + np.array([256, 256])
+            cv2.circle(birds_eye_view, p.astype(np.int64), 10, color, -1)
+
+    cv2.imshow("Bird's Eye View", birds_eye_view)
         
