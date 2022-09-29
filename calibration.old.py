@@ -1,32 +1,27 @@
 from unittest import skip
 import blobconverter
 import cv2
-import cv2.aruco as aruco
 import depthai
 import numpy as np
 
-# calibration parameters
+# CALIBRATION PARAMETERS
+
 # CHECKERBOARD = (8, 8)
-# CHECKERBOARD = (10, 7)
-CHECKERBOARD = (11, 8)
+CHECKERBOARD = (10, 7)
+# CHECKERBOARD = (11, 8)
 # CHECKERBOARD_CELL_SIZE = (0.46 / CHECKERBOARD[0], 0.46 / CHECKERBOARD[1])
-# CHECKERBOARD_CELL_SIZE = (0.251 / CHECKERBOARD[0], 0.176 / CHECKERBOARD[1])
-CHECKERBOARD_CELL_SIZE = (0.55 / CHECKERBOARD[0], 0.40 / CHECKERBOARD[1])
+CHECKERBOARD_CELL_SIZE = (0.251 / CHECKERBOARD[0], 0.176 / CHECKERBOARD[1])
+# CHECKERBOARD_CELL_SIZE = (0.55 / CHECKERBOARD[0], 0.40 / CHECKERBOARD[1])
 CHECKERBOARD_INNER = (CHECKERBOARD[0] - 1, CHECKERBOARD[1] - 1)
+
 HSV_LOW = np.array([0, 0, 143])
 HSV_HIGH = np.array([179, 61, 252])
+
 
 corners_world = np.zeros((1, CHECKERBOARD_INNER[0] * CHECKERBOARD_INNER[1], 3), np.float32)
 corners_world[0,:,:2] = np.mgrid[0:CHECKERBOARD_INNER[0], 0:CHECKERBOARD_INNER[1]].T.reshape(-1, 2)
 corners_world[:,:,0] *= CHECKERBOARD_CELL_SIZE[0]
 corners_world[:,:,1] *= CHECKERBOARD_CELL_SIZE[1]
-
-try:
-    distorsion_coef = np.load('calibration/distorsion_coef.good.npy')
-    intrinsic_mat = np.load('calibration/intrinsic_mat.good.npy')
-except:
-    distorsion_coef = None
-    intrinsic_mat = None
 
 
 cv2.namedWindow("video", cv2.WINDOW_NORMAL)
@@ -35,34 +30,27 @@ cv2.resizeWindow("video", 1280, 720)
 cv2.namedWindow("result", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("result", 1280, 720)
 
-# define the pipeline
-pipeline = depthai.Pipeline()
 
-cam_rgb = pipeline.create(depthai.node.ColorCamera)
-# cam_rgb.setPreviewSize(600, 600)
-cam_rgb.setResolution(depthai.ColorCameraProperties.SensorResolution.THE_4_K)
 
-controlIn = pipeline.create(depthai.node.XLinkIn)
-controlIn.setStreamName('control')
+def create_pipeline():
+    # define the pipeline
+    pipeline = depthai.Pipeline()
 
-xout_rgb = pipeline.createXLinkOut()
-xout_rgb.setStreamName("rgb")
-# cam_rgb.preview.link(xout_rgb.input)
-cam_rgb.video.link(xout_rgb.input)
-controlIn.out.link(cam_rgb.inputControl)
+    cam_rgb = pipeline.create(depthai.node.ColorCamera)
+    # cam_rgb.setPreviewSize(600, 600)
+    cam_rgb.setResolution(depthai.ColorCameraProperties.SensorResolution.THE_4_K)
 
-def clamp(num, v0, v1):
-    return max(v0, min(num, v1))
+    controlIn = pipeline.create(depthai.node.XLinkIn)
+    controlIn.setStreamName('control')
 
-def threshold(frame_rgb, frame_gray):
-    hsv = cv2.cvtColor(frame_rgb, cv2.COLOR_BGR2HSV)
-    # mask = cv2.threshold(frame_gray, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    # mask = cv2.inRange(frame_gray, 0, 128)
-    mask = cv2.inRange(hsv, HSV_LOW, HSV_HIGH)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 30))
-    dilated = cv2.dilate(mask, kernel, iterations=5)
-    bw = 255 - cv2.bitwise_and(dilated, mask)
-    return bw
+    xout_rgb = pipeline.createXLinkOut()
+    xout_rgb.setStreamName("rgb")
+    # cam_rgb.preview.link(xout_rgb.input)
+    cam_rgb.video.link(xout_rgb.input)
+    controlIn.out.link(cam_rgb.inputControl)
+
+    return pipeline
+
 
 def drawOrigin(frame, rot_vec, trans_vec, cam_mat, distortion):
     p_0 = cv2.projectPoints(np.float64([[0, 0, 0]]), rot_vec, trans_vec, cam_mat, distortion)[0]
@@ -78,8 +66,37 @@ def drawOrigin(frame, rot_vec, trans_vec, cam_mat, distortion):
     return reprojection
 
 
-device_info = depthai.DeviceInfo("19443010F1CCF41200") # left
-# device_info = depthai.DeviceInfo("194430107140F71200") # right
+def choose_camera():
+    devices = depthai.Device.getAllAvailableDevices()
+    for i, device in enumerate(devices):
+        print(f"[{i+1}] {device.getMxId()} {device.state}")
+
+    selected_device = int(input("Select device: "))
+    if selected_device > len(devices) or selected_device < 1:
+        print("Invalid device")
+        exit(1)
+
+    selected_device_id = devices[selected_device - 1].getMxId()
+    device_info = depthai.DeviceInfo(selected_device_id)
+
+    return device_info
+
+def load_camera_calibration(device_info):
+    id = device_info.getMxId()
+    try:
+        distorsion_coef = np.load(f"calibration/distorsion_coef.{id}.npy")
+        intrinsic_mat = np.load(f"calibration/intrinsic_mat.{id}.npy")
+    except:
+        distorsion_coef = None
+        intrinsic_mat = None
+
+    return distorsion_coef, intrinsic_mat
+    
+def save_camera_calibration(device_info, distorsion_coef, intrinsic_mat):
+    id = device_info.getMxId()
+    np.save(f"calibration/distorsion_coef.{id}.npy", distorsion_coef)
+    np.save(f"calibration/intrinsic_mat.{id}.npy", intrinsic_mat)
+
 
 with depthai.Device(pipeline, device_info) as device:
     q_rgb = device.getOutputQueue("rgb", maxSize=1, blocking=False)
@@ -113,44 +130,22 @@ with depthai.Device(pipeline, device_info) as device:
             ctrl.setManualExposure(33000, 200)
             controlQueue.send(ctrl)
 
-
-        # FOCUS - press 'f' to set auto focus region
-        if key == ord('f'):
-            roi = cv2.selectROI("video", frame, False)
-            print(roi)
-            ctrl = depthai.CameraControl()
-            ctrl.setAutoFocusMode(depthai.CameraControl.AutoFocusMode.AUTO)
-            ctrl.setAutoFocusRegion(int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3]))
-            ctrl.setAutoFocusTrigger()
-            controlQueue.send(ctrl)
-
         # CAPTURE - press `c` to capture a calibration frame
         if key == ord('c'):
-            aruco_dictionary = aruco.Dictionary_get(aruco.DICT_4X4_1000)
-            squaresX = 11
-            squaresY = 8
-            square_size = 0.05
-            mrk_size = 0.04
-            board = aruco.CharucoBoard_create(
-                    squaresX, squaresY,
-                    square_size,
-                    mrk_size,
-                    aruco_dictionary
-                )
-            marker_corners, ids, rejectedImgPoints = aruco.detectMarkers(frame, aruco_dictionary)
+            found, corners = cv2.findChessboardCorners(gray, CHECKERBOARD_INNER, cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_NORMALIZE_IMAGE)
 
-            marker_corners, ids, refusd, recoverd = cv2.aruco.refineDetectedMarkers(
-                gray, board, marker_corners, ids, rejectedCorners=rejectedImgPoints
-            )
+            if not found: 
+                print("No checkerboard found")
+                continue
 
-            print(f"found {len(marker_corners)} markers")
-
-            corners_display = frame.copy()
-            aruco.drawDetectedMarkers(corners_display, marker_corners, ids)
+            corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
+            corners_display = cv2.drawChessboardCorners(frame, CHECKERBOARD_INNER, corners, found)
             cv2.imshow("result", corners_display)
 
+            corners_list.append(corners)
+            corners_world_list.append(corners_world)
 
-
+            print(f"Calibration frame added ({len(corners_list)})")
 
         # POSE ESTIMATION - press `p` to estimate the pose
         if key == ord('p'):
