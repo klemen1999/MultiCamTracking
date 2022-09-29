@@ -12,8 +12,7 @@ class Calibrator:
 
         self.corners_world = np.zeros((1, self.checkerboard_inner_size[0] * self.checkerboard_inner_size[1], 3), np.float32)
         self.corners_world[0,:,:2] = np.mgrid[0:self.checkerboard_inner_size[0], 0:self.checkerboard_inner_size[1]].T.reshape(-1, 2)
-        self.corners_world[:,:,0] *= square_size
-        self.corners_world[:,:,1] *= square_size # TODO: Check if this could be done in one line
+        self.corners_world *= square_size
 
         self.corners_list = []
         self.corners_world_list = []
@@ -115,16 +114,16 @@ class Calibrator:
         return self.draw_origin(frame_rgb)
 
     def draw_origin(self, frame_rgb: cv2.Mat):
-        # TODO: Check if this could be done in one line
-        p_0 = cv2.projectPoints(np.float64([[0, 0, 0]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]
-        p_x = cv2.projectPoints(np.float64([[0.1, 0, 0]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]
-        p_y = cv2.projectPoints(np.float64([[0, 0.1, 0]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]
-        p_z = cv2.projectPoints(np.float64([[0, 0, -0.1]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]
+        points, _ = cv2.projectPoints(
+            np.float64([[0, 0, 0], [0.1, 0, 0], [0, 0.1, 0], [0, 0, -0.1]]), 
+            self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef
+        )
+        [p_0, p_x, p_y, p_z] = points.astype(np.int64)
 
         reprojection = frame_rgb.copy()
-        reprojection = cv2.line(reprojection, p_0[0][0].astype(np.int64), p_x[0][0].astype(np.int64), (0, 0, 255), 5)
-        reprojection = cv2.line(reprojection, p_0[0][0].astype(np.int64), p_y[0][0].astype(np.int64), (0, 255, 0), 5)
-        reprojection = cv2.line(reprojection, p_0[0][0].astype(np.int64), p_z[0][0].astype(np.int64), (255, 0, 0), 5)
+        reprojection = cv2.line(reprojection, p_0[0], p_x[0], (0, 0, 255), 5)
+        reprojection = cv2.line(reprojection, p_0[0], p_y[0], (0, 255, 0), 5)
+        reprojection = cv2.line(reprojection, p_0[0], p_z[0], (255, 0, 0), 5)
 
         return reprojection
     
