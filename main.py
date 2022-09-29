@@ -61,7 +61,7 @@ while True:
 
     # SHOW OTHER CAMERAS - press `o` to show the other cameras
     if key == ord('o'):
-        still_rgb, still_gray = selected_camera.capture_still(show=False)
+        still_rgb = selected_camera.capture_still(show=False)
         calibrator = selected_camera.calibrator
         p_0 = cv2.projectPoints(
             np.float64([[0, 0, 0]]), calibrator.rot_vec, calibrator.trans_vec, 
@@ -74,11 +74,10 @@ while True:
             if camera is selected_camera:
                 continue
 
-            if camera.calibrator.rot_vec is None or camera.calibrator.trans_vec is None:
+            if camera.calibrator.camToWorld is None:
                 continue
 
-            rotM = cv2.Rodrigues(camera.calibrator.rot_vec)[0]
-            camera_position = -np.matrix(rotM).T * np.matrix(camera.calibrator.trans_vec)
+            camera_position = (camera.calibrator.camToWorld @ np.array([[0,0,0,1]]).T)[:3]
 
             print(camera_position)
             p = cv2.projectPoints(

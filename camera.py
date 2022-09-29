@@ -204,11 +204,12 @@ class Camera:
         in_still = None
         start_time = time.time()*1000
         while in_still is None:
-            print(".", end="")
+            # print(".", end="")
+            time.sleep(0.1)
             in_still = self.still_queue.tryGet()
             if time.time()*1000 - start_time > timeout_ms:
-                print("did not recieve still - timeout")
-                return None
+                print("did not recieve still image - retrying")
+                return self.capture_still(show, timeout_ms)
 
         still_rgb = cv2.imdecode(in_still.getData(), cv2.IMREAD_UNCHANGED)
         if show:

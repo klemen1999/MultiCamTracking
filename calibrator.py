@@ -24,10 +24,14 @@ class Calibrator:
         self.distortion_coef = None
         self.rot_vec = None
         self.trans_vec = None
+        self.worldToCam = None
+        self.camToWorld = None
 
         self.load_calibration_from_file()
 
     def find_checkerboard_corners(self, frame_gray: cv2.Mat):
+        print("Finding checkerboard corners...")
+
         found, corners = cv2.findChessboardCorners(
             frame_gray, self.checkerboard_inner_size, 
             cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_NORMALIZE_IMAGE
@@ -95,10 +99,15 @@ class Calibrator:
             self.corners_world, corners, self.intrinsic_mat, self.distortion_coef
         )
 
+        rotM = cv2.Rodrigues(rvec)[0]
+        self.worldToCam = np.vstack((np.hstack((rotM, tvec)), np.array([0,0,0,1])))
+        self.camToWorld = np.linalg.inv(self.worldToCam)
+
         print("POSE ESTIMATION DONE")
         print("ret: ", ret)
         print("Rotation vector : \n", rvec)
         print("Translation vector : \n", tvec)
+        print("Camer to World transformation matrix : \n", self.camToWorld)
 
         self.rot_vec = rvec
         self.trans_vec = tvec
