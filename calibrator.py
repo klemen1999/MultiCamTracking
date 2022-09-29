@@ -106,6 +106,7 @@ class Calibrator:
         return self.draw_origin(frame_rgb)
 
     def draw_origin(self, frame_rgb: cv2.Mat):
+        # TODO: Check if this could be done in one line
         p_0 = cv2.projectPoints(np.float64([[0, 0, 0]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]
         p_x = cv2.projectPoints(np.float64([[0.1, 0, 0]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]
         p_y = cv2.projectPoints(np.float64([[0, 0.1, 0]]), self.rot_vec, self.trans_vec, self.intrinsic_mat, self.distortion_coef)[0]

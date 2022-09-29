@@ -35,6 +35,7 @@ class Camera:
 
     def __del__(self):
         self.device.close()
+        print("=== Closed " + self.device_info.getMxId())
     
     def _createPipeline(self):
         pipeline = dai.Pipeline()
