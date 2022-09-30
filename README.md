@@ -1,5 +1,6 @@
 # Multi camera calibration
 This example demonstrates multiple Luxonis OAK cameras tracking objects and showing their position in bird's-eye view. 
+
 ![](img/demo.gif)
 ## Controls
 | key 			| action
