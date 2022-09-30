@@ -59,6 +59,10 @@ while True:
     if key == ord('t'):
         selected_camera.capture_still(show=True)
 
+    # TOGGLE DEPTH VIEW - press `d` to toggle depth view
+    if key == ord('d'):
+        selected_camera.show_detph = not selected_camera.show_detph
+
     # SHOW OTHER CAMERAS - press `o` to show the other cameras
     if key == ord('o'):
         still_rgb = selected_camera.capture_still(show=False)

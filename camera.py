@@ -12,6 +12,7 @@ class Camera:
 
     def __init__(self, device_info: dai.DeviceInfo, friendly_id: int, show_video: bool = True):
         self.show_video = show_video
+        self.show_detph = False
         self.device_info = device_info
         self.friendly_id = friendly_id
         self.mxid = device_info.getMxId()
@@ -125,8 +126,10 @@ class Camera:
 
         self.frame_rgb = in_rgb.getCvFrame()
 
-        visualization = self.frame_rgb.copy()
-        # visualization = depth_frame_color.copy()
+        if self.show_detph:
+            visualization = depth_frame_color.copy()
+        else:
+            visualization = self.frame_rgb.copy()
         visualization = cv2.resize(visualization, (640, 360), interpolation = cv2.INTER_NEAREST)
 
         height = visualization.shape[0]
