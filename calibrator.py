@@ -28,6 +28,7 @@ class Calibrator:
         self.position = None
 
         self.load_calibration_from_file()
+        self.load_pose_from_file()
 
     def find_checkerboard_corners(self, frame_gray: cv2.Mat):
         print("Finding checkerboard corners...")
@@ -85,6 +86,12 @@ class Calibrator:
 
         return intrinsic_mat, distorsion_coef
 
+    def compute_transformations(self, rvec, tvec):
+        rotM = cv2.Rodrigues(rvec)[0]
+        self.world_to_cam = np.vstack((np.hstack((rotM, tvec)), np.array([0,0,0,1])))
+        self.cam_to_world = np.linalg.inv(self.world_to_cam)
+        self.position = (self.cam_to_world @ np.array([[0,0,0,1]]).T)[:3]
+
     def compute_pose_estimation(self, frame_rgb: cv2.Mat, frame_gray: cv2.Mat):
         if self.intrinsic_mat is None or self.distortion_coef is None:
             print("No calibration parameters. Cannot compute pose estimation.")
@@ -99,10 +106,7 @@ class Calibrator:
             self.corners_world, corners, self.intrinsic_mat, self.distortion_coef
         )
 
-        rotM = cv2.Rodrigues(rvec)[0]
-        self.world_to_cam = np.vstack((np.hstack((rotM, tvec)), np.array([0,0,0,1])))
-        self.cam_to_world = np.linalg.inv(self.world_to_cam)
-        self.position = (self.cam_to_world @ np.array([[0,0,0,1]]).T)[:3]
+        self.compute_transformations(rvec, tvec)
 
         print("POSE ESTIMATION DONE")
         print("ret: ", ret)
@@ -112,6 +116,8 @@ class Calibrator:
 
         self.rot_vec = rvec
         self.trans_vec = tvec
+
+        self.save_pose_to_file()
 
         return self.draw_origin(frame_rgb)
 
@@ -156,4 +162,34 @@ class Calibrator:
             return False
 
         print(f"Calibration parameters loaded from `{intrinsic_mat_filename}` and `{distorsion_coef_filename}`.")
+        return True
+
+    def save_pose_to_file(self):
+        mxid = self.device_info.getMxId()
+        rot_vec_filename = f"config/rot_vec.{mxid}.npy"
+        trans_vec_filename = f"config/trans_vec.{mxid}.npy"
+
+        try:
+            np.save(rot_vec_filename, self.rot_vec)
+            np.save(trans_vec_filename, self.trans_vec)
+        except Exception as e:
+            print("Could not save pose to file")
+            print(e)
+            return False
+
+        print(f"Pose parameters saved to `{rot_vec_filename}` and `{trans_vec_filename}`.")
+
+    def load_pose_from_file(self):
+        mxid = self.device_info.getMxId()
+        rot_vec_filename = f"config/rot_vec.{mxid}.npy"
+        trans_vec_filename = f"config/trans_vec.{mxid}.npy"
+        try:
+            self.rot_vec = np.load(rot_vec_filename)
+            self.trans_vec = np.load(trans_vec_filename)
+            self.compute_transformations(self.rot_vec, self.trans_vec)
+        except:
+            print(f"Could not load calibration parameters from `{rot_vec_filename}` and `{trans_vec_filename}`.")
+            return False
+
+        print(f"Calibration parameters loaded from `{rot_vec_filename}` and `{trans_vec_filename}`.")
         return True

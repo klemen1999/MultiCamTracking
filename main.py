@@ -98,6 +98,7 @@ while True:
     if key == ord('q'):
         break
 
+
     birds_eye_view = np.zeros([512,512,3],dtype=np.uint8)
 
     cv2.line(birds_eye_view, (256, 256), (256+30, 256), (0, 0, 255), 2)
@@ -115,13 +116,13 @@ while True:
             p = camera.calibrator.position.flatten()[:2]*100 + np.array([256,256])
             cv2.circle(birds_eye_view, p.astype(np.int64), 5, color, -1)
 
-            p_z = (camera.calibrator.cam_to_world @ np.array([[0,0,0.6,1]]).T)[:3]
+            p_z = (camera.calibrator.cam_to_world @ np.array([[0.2,0,0.1,1]]).T)[:3]
             p_z = p_z.flatten()[:2]*100 + np.array([256,256])
-            cv2.line(birds_eye_view, p.astype(np.int64), p_z.astype(np.int64), color, 2)
+            cv2.line(birds_eye_view, p.astype(np.int64), p_z.astype(np.int64), color, 1)
 
-            p_x = (camera.calibrator.cam_to_world @ np.array([[0.3,0,0,1]]).T)[:3]
+            p_x = (camera.calibrator.cam_to_world @ np.array([[-0.2,0,0.1,1]]).T)[:3]
             p_x = p_x.flatten()[:2]*100 + np.array([256,256])
-            cv2.line(birds_eye_view, p.astype(np.int64), p_x.astype(np.int64), color, 2)
+            cv2.line(birds_eye_view, p.astype(np.int64), p_x.astype(np.int64), color, 1)
 
 
         for o in camera.detected_objects:
