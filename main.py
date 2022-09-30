@@ -1,5 +1,6 @@
 import cv2
 import depthai as dai
+from birdseyeview import BirdsEyeView
 from camera import Camera
 from typing import List
 import numpy as np
@@ -34,6 +35,8 @@ def select_camera(friendly_id: int):
     return selected_camera
 
 select_camera(1)
+
+birds_eye_view = BirdsEyeView(cameras, 512, 512, 100)
 
 while True:
     key = cv2.waitKey(1)
@@ -98,100 +101,12 @@ while True:
         cv2.imshow(selected_camera.window_name, still_rgb)
         cv2.waitKey()
 
-    # BIRDSEYE VIEW
-    width = 512
-    height = 512
-    scale = 100 # 1m = 100px
-    colors = [(0, 255, 255), (255, 0, 255), (255, 255, 0), (0,0,255), (0,255,0), (255,0,0)]
-    birds_eye_view = np.zeros([width,height,3], dtype=np.uint8)
-
-    world_to_birds_eye = np.array([
-        [scale, 0, 0, width//2],
-        [0, scale, 0, height//2],
-    ])
-
-    # draw the coordinate system
-    p_0 = (world_to_birds_eye @ np.array([0, 0, 0, 1])).astype(np.int64)
-    p_x = (world_to_birds_eye @ np.array([0.3, 0, 0, 1])).astype(np.int64)
-    p_y = (world_to_birds_eye @ np.array([0, 0.3, 0, 1])).astype(np.int64)
-    cv2.line(birds_eye_view, p_0, p_x, (0, 0, 255), 2)
-    cv2.line(birds_eye_view, p_0, p_y, (0, 255, 0), 2)
-
-    # make groups
-    n = 2 # use only first n components
-    distance_threshold = 1.5 # m
-    for camera in cameras:
-        for det in camera.detected_objects:
-            det.corresponding_detections = []
-            for other_camera in cameras:
-                # find closest detection
-                d = np.inf
-                closest_det = None
-                for other_det in other_camera.detected_objects:
-                    if other_det.label != det.label:
-                        continue
-                    d_ = np.linalg.norm(det.pos[:,:n] - other_det.pos[:,:n])
-                    if d_ < d:
-                        d = d_
-                        closest_det = other_det
-                if closest_det is not None and d < distance_threshold:
-                    det.corresponding_detections.append(closest_det)
-    # keep only double correspondences
-    for camera in cameras:
-        for det in camera.detected_objects:
-            det.corresponding_detections = [other_det for other_det in det.corresponding_detections if det in other_det.corresponding_detections]
-    # find groups of correspondences
-    groups = []
-    for camera in cameras:
-        for det in camera.detected_objects:
-            # find group
-            group = None
-            for g in groups:
-                if det in g:
-                    group = g
-                    break
-            if group is None:
-                group = set()
-                groups.append(group)
-            # add to group
-            group.add(det)
-            for other_det in det.corresponding_detections:
-                if other_det not in group:
-                    group.add(other_det)
-
 
     for camera in cameras:
         camera.update()
 
-        try:
-            color = colors[camera.friendly_id - 1]
-        except:
-            color = (255,255,255)
+    birds_eye_view.render()
 
-        # draw the camera position
-        if camera.calibrator.position is not None:
-            p = (world_to_birds_eye @ (camera.calibrator.cam_to_world @ np.array([0,0,0,1]))).astype(np.int64)
-            p_l = (world_to_birds_eye @ (camera.calibrator.cam_to_world @ np.array([0.2,0,0.1,1]))).astype(np.int64)
-            p_r = (world_to_birds_eye @ (camera.calibrator.cam_to_world @ np.array([-0.2,0,0.1,1]))).astype(np.int64)
-            cv2.circle(birds_eye_view, p, 5, color, -1)
-            cv2.line(birds_eye_view, p, p_l, color, 1)
-            cv2.line(birds_eye_view, p, p_r, color, 1)
 
-    # draw the groups
-    for group in groups:
-        avg = np.zeros(2)
-        label = ""
-        for det in group:
-            label = det.label
-            try: c = colors[det.camera_friendly_id - 1]
-            except: c = (255,255,255)
-            p = (world_to_birds_eye @ det.pos).flatten().astype(np.int64)
-            avg += p
-            cv2.circle(birds_eye_view, p, 2, c, -1)
 
-        avg = (avg/len(group)).astype(np.int64)
-        cv2.circle(birds_eye_view, avg, int(0.25*scale), (255, 255, 255), 0)
-        cv2.putText(birds_eye_view, str(label), avg+np.array([0, int(0.25*scale) + 10]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-    cv2.imshow("Bird's Eye View", birds_eye_view)
         
