@@ -70,21 +70,21 @@ class Calibrator:
             print("No calibration frames. Cannot compute calibration.")
             return None
 
-        ret, intrinsic_mat, distorsion_coef, rvecs, tvecs = cv2.calibrateCamera(
+        ret, intrinsic_mat, distortion_coef, rvecs, tvecs = cv2.calibrateCamera(
             self.corners_world_list, self.corners_list, self.last_frame_gray.shape[::-1], None, None
         )
 
         print("CALIBRATION DONE")
         print("ret: ", ret)
         print("Camera intrinsic matrix : \n", intrinsic_mat)
-        print("Lens distortion coefficients : \n", distorsion_coef)
+        print("Lens distortion coefficients : \n", distortion_coef)
         # print("Rotation vectors : \n", rvecs)
         # print("Translation vectors : \n", tvecs)
 
         self.intrinsic_mat = intrinsic_mat
-        self.distortion_coef = distorsion_coef
+        self.distortion_coef = distortion_coef
 
-        return intrinsic_mat, distorsion_coef
+        return intrinsic_mat, distortion_coef
 
     def compute_transformations(self, rvec, tvec):
         rotM = cv2.Rodrigues(rvec)[0]
@@ -138,30 +138,30 @@ class Calibrator:
     def save_calibration_to_file(self):
         mxid = self.device_info.getMxId()
         intrinsic_mat_filename = f"config/intrinsic_mat.{mxid}.npy"
-        distorsion_coef_filename = f"config/distorsion_coef.{mxid}.npy"
+        distortion_coef_filename = f"config/distortion_coef.{mxid}.npy"
         try:
             np.save(intrinsic_mat_filename, self.intrinsic_mat)
-            np.save(distorsion_coef_filename, self.distortion_coef)
+            np.save(distortion_coef_filename, self.distortion_coef)
         except Exception as e:
             print("Could not save calibration to file")
             print(e)
             return False
 
-        print(f"Calibration parameters saved to `{intrinsic_mat_filename}` and `{distorsion_coef_filename}`.")
+        print(f"Calibration parameters saved to `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
         return True
 
     def load_calibration_from_file(self):
         mxid = self.device_info.getMxId()
         intrinsic_mat_filename = f"config/intrinsic_mat.{mxid}.npy"
-        distorsion_coef_filename = f"config/distorsion_coef.{mxid}.npy"
+        distortion_coef_filename = f"config/distortion_coef.{mxid}.npy"
         try:
             self.intrinsic_mat = np.load(intrinsic_mat_filename)
-            self.distortion_coef = np.load(distorsion_coef_filename)
+            self.distortion_coef = np.load(distortion_coef_filename)
         except:
-            print(f"Could not load calibration parameters from `{intrinsic_mat_filename}` and `{distorsion_coef_filename}`.")
+            print(f"Could not load calibration parameters from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
             return False
 
-        print(f"Calibration parameters loaded from `{intrinsic_mat_filename}` and `{distorsion_coef_filename}`.")
+        print(f"Calibration parameters loaded from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
         return True
 
     def save_pose_to_file(self):
