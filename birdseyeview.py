@@ -2,15 +2,17 @@ from camera import Camera
 from typing import List
 import numpy as np
 import cv2
+import collections
 
 class BirdsEyeView:
     colors = [(0, 255, 255), (255, 0, 255), (255, 255, 0), (0,0,255), (0,255,0), (255,0,0)]
 
-    def __init__(self, cameras: List[Camera], width, height, scale):
+    def __init__(self, cameras: List[Camera], width, height, scale, trail_length=300):
         self.cameras = cameras
         self.width = width
         self.height = height
         self.scale = scale
+        self.history = collections.deque(maxlen=trail_length)
 
         self.img = np.zeros((height, width, 3), np.uint8)
         self.world_to_birds_eye = np.array([
@@ -103,12 +105,24 @@ class BirdsEyeView:
             cv2.circle(self.img, avg, int(0.25*self.scale), (255, 255, 255), 0)
             cv2.putText(self.img, str(label), avg+np.array([0, int(0.25*self.scale) + 10]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
+    def draw_history(self):
+        for i, groups in enumerate(self.history):
+            for group in groups:
+                avg = np.zeros(2)
+                for det in group:
+                    p = (self.world_to_birds_eye @ det.pos).flatten().astype(np.int64)
+                    avg += p
+                avg = (avg/len(group)).astype(np.int64)
+                c = int(i/self.history.maxlen*50)
+                cv2.circle(self.img, avg, int(i/self.history.maxlen*10), (c, c, c), -1)
 
     def render(self):
         self.img = np.zeros((self.height, self.width, 3), np.uint8)
         self.draw_coordinate_system()
         self.draw_cameras()
         groups = self.make_groups()
+        self.draw_history()
+        self.history.append(groups)
         self.draw_groups(groups)
 
         cv2.imshow("Bird's Eye View", self.img)
