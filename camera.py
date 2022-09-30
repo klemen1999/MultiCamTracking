@@ -5,6 +5,7 @@ from calibrator import Calibrator
 import time
 import numpy as np
 from typing import List
+from detection import Detection
 
 class Camera:
     label_map = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
@@ -32,7 +33,7 @@ class Camera:
             cv2.resizeWindow(self.window_name, 640, 360)
 
         self.frame_rgb = None 
-        self.detected_objects: List[np.ndarray] = []
+        self.detected_objects: List[Detection] = []
 
         self.calibrator = Calibrator((10, 7), 0.0251, device_info)
 
@@ -79,7 +80,7 @@ class Camera:
         # Spatial detection network -> 'nn'
         spatial_nn = pipeline.create(dai.node.MobileNetSpatialDetectionNetwork)
         spatial_nn.setBlobPath(blobconverter.from_zoo(name='mobilenet-ssd', shaves=6))
-        spatial_nn.setConfidenceThreshold(0.5)
+        spatial_nn.setConfidenceThreshold(0.6)
         spatial_nn.input.setBlocking(False)
         spatial_nn.setBoundingBoxScaleFactor(0.2)
         spatial_nn.setDepthLowerThreshold(100)
@@ -164,7 +165,7 @@ class Camera:
                     label = detection.label
 
                 # show only people
-                if label != 'person':
+                if label not in ['person', 'chair']:
                     continue
                 
                 if self.calibrator.cam_to_world is not None:
@@ -172,7 +173,8 @@ class Camera:
                     # pos_camera_frame = np.array([[0, 0, detection.spatialCoordinates.z/1000, 1]]).T
                     pos_world_frame = self.calibrator.cam_to_world @ pos_camera_frame
 
-                    self.detected_objects.append(pos_world_frame)
+                    self.detected_objects.append(Detection(label, detection.confidence, pos_world_frame, self.friendly_id))
+
 
                 cv2.rectangle(visualization, (xmin, ymin), (xmax, ymax), (100, 0, 0), 2)
                 cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)
