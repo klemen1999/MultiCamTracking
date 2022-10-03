@@ -3,7 +3,6 @@ import depthai as dai
 from birdseyeview import BirdsEyeView
 from camera import Camera
 from typing import List
-import numpy as np
 
 device_infos = dai.Device.getAllAvailableDevices()
 if len(device_infos) == 0:
@@ -49,58 +48,14 @@ while True:
     if key >= ord('1') and key <= ord('9'):
         select_camera(key - ord('1') + 1)
 
-    # CAPTURE CALIBRATION FRAME - press `c` to capture a calibration frame
-    if key == ord('c'):
-        selected_camera.capture_calibration_frame()
-
-    # SAVE CALIBRATION - press `s` to calibrate the selected camera and save the calibration
-    if key == ord('s'):
-        selected_camera.calibrator.compute_calibration()
-        selected_camera.calibrator.save_calibration_to_file()
-
     # POSE ESTIMATION - press `p` to start pose estimation
     if key == ord('p'):
         selected_camera.capture_pose_estimation_frame()
 
-    # CAPTURE STILL IMAGE - press `i` to capture a still image
-    if key == ord('t'):
-        selected_camera.capture_still(show=True)
-
     # TOGGLE DEPTH VIEW - press `d` to toggle depth view
     if key == ord('d'):
-        selected_camera.show_detph = not selected_camera.show_detph
-
-    # SHOW OTHER CAMERAS - press `o` to show the other cameras
-    if key == ord('o'):
-        still_rgb = selected_camera.capture_still(show=False)
-        calibrator = selected_camera.calibrator
-        p_0 = cv2.projectPoints(
-            np.float64([[0, 0, 0]]), calibrator.rot_vec, calibrator.trans_vec, 
-            calibrator.intrinsic_mat, calibrator.distortion_coef
-        )[0]
-        still_rgb = cv2.drawMarker(still_rgb, p_0[0][0].astype(np.int64), (0, 255, 0), cv2.MARKER_CROSS, 50, 4)
-
-        # draw the other cameras
         for camera in cameras:
-            if camera is selected_camera:
-                continue
-
-            if camera.calibrator.cam_to_world is None:
-                continue
-
-            camera_position = (camera.calibrator.cam_to_world @ np.array([[0,0,0,1]]).T)[:3]
-
-            print(camera_position)
-            p = cv2.projectPoints(
-                camera_position, calibrator.rot_vec, calibrator.trans_vec, 
-                calibrator.intrinsic_mat, calibrator.distortion_coef
-            )[0]
-
-            still_rgb = cv2.drawMarker(still_rgb, p[0][0].astype(np.int64), (255, 0, 255), cv2.MARKER_CROSS, 50, 4)
-
-        cv2.imshow(selected_camera.window_name, still_rgb)
-        cv2.waitKey()
-
+            camera.show_detph = not camera.show_detph
 
     for camera in cameras:
         camera.update()

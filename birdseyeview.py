@@ -35,10 +35,10 @@ class BirdsEyeView:
                 color = (255,255,255)
 
             # draw the camera position
-            if camera.calibrator.position is not None:
-                p = (self.world_to_birds_eye @ (camera.calibrator.cam_to_world @ np.array([0,0,0,1]))).astype(np.int64)
-                p_l = (self.world_to_birds_eye @ (camera.calibrator.cam_to_world @ np.array([0.2,0,0.1,1]))).astype(np.int64)
-                p_r = (self.world_to_birds_eye @ (camera.calibrator.cam_to_world @ np.array([-0.2,0,0.1,1]))).astype(np.int64)
+            if camera.calibration.position is not None:
+                p = (self.world_to_birds_eye @ (camera.calibration.cam_to_world @ np.array([0,0,0,1]))).astype(np.int64)
+                p_l = (self.world_to_birds_eye @ (camera.calibration.cam_to_world @ np.array([0.2,0,0.1,1]))).astype(np.int64)
+                p_r = (self.world_to_birds_eye @ (camera.calibration.cam_to_world @ np.array([-0.2,0,0.1,1]))).astype(np.int64)
                 cv2.circle(self.img, p, 5, color, -1)
                 cv2.line(self.img, p, p_l, color, 1)
                 cv2.line(self.img, p, p_r, color, 1)

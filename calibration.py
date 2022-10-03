@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from typing import Tuple
 
-class Calibrator:
+class Calibration:
     def __init__(self, checkerboard_size: Tuple[int, int], square_size: float, device: dai.Device):
         self.checkerboard_size = checkerboard_size
         self.checkerboard_inner_size = (checkerboard_size[0] - 1, checkerboard_size[1] - 1)
@@ -15,9 +15,6 @@ class Calibrator:
         self.corners_world[0,:,:2] = np.mgrid[0:self.checkerboard_inner_size[0], 0:self.checkerboard_inner_size[1]].T.reshape(-1, 2)
         self.corners_world *= square_size
 
-        self.corners_list = []
-        self.corners_world_list = []
-
         self.last_frame_gray = None
 
         self.intrinsic_mat = None
@@ -28,7 +25,7 @@ class Calibrator:
         self.cam_to_world = None
         self.position = None
 
-        self.load_calibration_from_file()
+        self.load_calibration_from_camera()
         self.load_pose_from_file()
 
     def find_checkerboard_corners(self, frame_gray: cv2.Mat):
@@ -48,44 +45,6 @@ class Calibrator:
         )
 
         return corners
-    
-    def add_calibration_frame(self, frame_rgb: cv2.Mat, frame_gray: cv2.Mat):
-        corners = self.find_checkerboard_corners(frame_gray)
-        if corners is None:
-            print("No checkerboard found")
-            return None
-
-        corners_display = cv2.drawChessboardCorners(frame_rgb, self.checkerboard_inner_size, corners, True)
-
-        self.corners_list.append(corners)
-        self.corners_world_list.append(self.corners_world)
-        self.last_frame_gray = frame_gray
-
-        print(f"Calibration frame added ({len(self.corners_list)})")
-
-        return corners_display
-
-        
-    def compute_calibration(self):
-        if len(self.corners_list) == 0:
-            print("No calibration frames. Cannot compute calibration.")
-            return None
-
-        ret, intrinsic_mat, distortion_coef, rvecs, tvecs = cv2.calibrateCamera(
-            self.corners_world_list, self.corners_list, self.last_frame_gray.shape[::-1], None, None
-        )
-
-        print("CALIBRATION DONE")
-        print("ret: ", ret)
-        print("Camera intrinsic matrix : \n", intrinsic_mat)
-        print("Lens distortion coefficients : \n", distortion_coef)
-        # print("Rotation vectors : \n", rvecs)
-        # print("Translation vectors : \n", tvecs)
-
-        self.intrinsic_mat = intrinsic_mat
-        self.distortion_coef = distortion_coef
-
-        return intrinsic_mat, distortion_coef
 
     def compute_transformations(self, rvec, tvec):
         rotM = cv2.Rodrigues(rvec)[0]
@@ -136,36 +95,6 @@ class Calibrator:
 
         return reprojection
     
-    def save_calibration_to_file(self):
-        mxid = self.device_info.getMxId()
-        intrinsic_mat_filename = f"config/intrinsic_mat.{mxid}.npy"
-        distortion_coef_filename = f"config/distortion_coef.{mxid}.npy"
-        try:
-            np.save(intrinsic_mat_filename, self.intrinsic_mat)
-            np.save(distortion_coef_filename, self.distortion_coef)
-        except Exception as e:
-            print("Could not save calibration to file")
-            print(e)
-            return False
-
-        print(f"Calibration parameters saved to `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
-        return True
-
-    def load_calibration_from_file(self):
-        mxid = self.device_info.getMxId()
-        intrinsic_mat_filename = f"config/intrinsic_mat.{mxid}.npy"
-        distortion_coef_filename = f"config/distortion_coef.{mxid}.npy"
-        try:
-            self.intrinsic_mat = np.load(intrinsic_mat_filename)
-            self.distortion_coef = np.load(distortion_coef_filename)
-        except:
-            print(f"Could not load calibration parameters from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`. Loading calibration from camera ...")
-            self.load_calibration_from_camera()
-            return False
-
-        print(f"Calibration parameters loaded from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
-        return True
-
     def load_calibration_from_camera(self):
         self.intrinsic_mat = self.device.readCalibration().getCameraIntrinsics(dai.CameraBoardSocket.RGB, 3840, 2160)
         self.intrinsic_mat = np.array(self.intrinsic_mat)

@@ -1,7 +1,7 @@
 import depthai as dai
 import blobconverter
 import cv2
-from calibrator import Calibrator
+from calibration import Calibration
 import time
 import numpy as np
 from typing import List
@@ -35,7 +35,7 @@ class Camera:
         self.frame_rgb = None 
         self.detected_objects: List[Detection] = []
 
-        self.calibrator = Calibrator((10, 7), 0.0251, self.device)
+        self.calibration = Calibration((10, 7), 0.0251, self.device)
 
         print("=== Connected to " + self.device_info.getMxId())
 
@@ -140,9 +140,10 @@ class Camera:
         if in_nn is not None:
             detections = in_nn.detections
 
+        mapping = self.mapping_queue.tryGet()
         self.detected_objects = []
-        if len(detections) > 0:
-            roi_datas = self.mapping_queue.get().getConfigData()
+        if len(detections) > 0 and mapping is not None:
+            roi_datas = mapping.getConfigData()
 
             for roi_data, detection in zip(roi_datas, detections):
                 roi = roi_data.roi
@@ -163,15 +164,11 @@ class Camera:
                     label = self.label_map[detection.label]
                 except:
                     label = detection.label
-
-                # show only people
-                if label not in ['person', 'chair']:
-                    continue
                 
-                if self.calibrator.cam_to_world is not None:
+                if self.calibration.cam_to_world is not None:
                     pos_camera_frame = np.array([[detection.spatialCoordinates.x / 1000, -detection.spatialCoordinates.y / 1000, detection.spatialCoordinates.z / 1000, 1]]).T
                     # pos_camera_frame = np.array([[0, 0, detection.spatialCoordinates.z/1000, 1]]).T
-                    pos_world_frame = self.calibrator.cam_to_world @ pos_camera_frame
+                    pos_world_frame = self.calibration.cam_to_world @ pos_camera_frame
 
                     self.detected_objects.append(Detection(label, detection.confidence, pos_world_frame, self.friendly_id))
 
@@ -187,18 +184,6 @@ class Camera:
 
         if self.show_video:
             cv2.imshow(self.window_name, visualization)
-        
-
-    def capture_calibration_frame(self):
-        still_rgb = self.capture_still()
-        if still_rgb is None:
-            return
-
-        still_gray = cv2.cvtColor(still_rgb, cv2.COLOR_BGR2GRAY)
-        result = self.calibrator.add_calibration_frame(still_rgb, still_gray)
-        if result is not None:
-            cv2.imshow(self.window_name, result)
-            cv2.waitKey()
 
     def capture_pose_estimation_frame(self):
         still_rgb = self.capture_still()
@@ -206,7 +191,7 @@ class Camera:
             return
 
         still_gray = cv2.cvtColor(still_rgb, cv2.COLOR_BGR2GRAY)
-        result = self.calibrator.compute_pose_estimation(still_rgb, still_gray)
+        result = self.calibration.compute_pose_estimation(still_rgb, still_gray)
         if result is not None:
             cv2.imshow(self.window_name, result)
             cv2.waitKey()
