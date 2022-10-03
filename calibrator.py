@@ -4,11 +4,12 @@ import numpy as np
 from typing import Tuple
 
 class Calibrator:
-    def __init__(self, checkerboard_size: Tuple[int, int], square_size: float, device_info: dai.DeviceInfo):
+    def __init__(self, checkerboard_size: Tuple[int, int], square_size: float, device: dai.Device):
         self.checkerboard_size = checkerboard_size
         self.checkerboard_inner_size = (checkerboard_size[0] - 1, checkerboard_size[1] - 1)
         self.square_size = square_size
-        self.device_info = device_info
+        self.device = device
+        self.device_info = device.getDeviceInfo()
 
         self.corners_world = np.zeros((1, self.checkerboard_inner_size[0] * self.checkerboard_inner_size[1], 3), np.float32)
         self.corners_world[0,:,:2] = np.mgrid[0:self.checkerboard_inner_size[0], 0:self.checkerboard_inner_size[1]].T.reshape(-1, 2)
@@ -158,11 +159,17 @@ class Calibrator:
             self.intrinsic_mat = np.load(intrinsic_mat_filename)
             self.distortion_coef = np.load(distortion_coef_filename)
         except:
-            print(f"Could not load calibration parameters from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
+            print(f"Could not load calibration parameters from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`. Loading calibration from camera ...")
+            self.load_calibration_from_camera()
             return False
 
         print(f"Calibration parameters loaded from `{intrinsic_mat_filename}` and `{distortion_coef_filename}`.")
         return True
+
+    def load_calibration_from_camera(self):
+        self.intrinsic_mat = self.device.readCalibration().getCameraIntrinsics(dai.CameraBoardSocket.RGB, 3840, 2160)
+        self.intrinsic_mat = np.array(self.intrinsic_mat)
+        self.distortion_coef = np.zeros((1,5))
 
     def save_pose_to_file(self):
         mxid = self.device_info.getMxId()

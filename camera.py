@@ -35,7 +35,7 @@ class Camera:
         self.frame_rgb = None 
         self.detected_objects: List[Detection] = []
 
-        self.calibrator = Calibrator((10, 7), 0.0251, device_info)
+        self.calibrator = Calibrator((10, 7), 0.0251, self.device)
 
         print("=== Connected to " + self.device_info.getMxId())
 
