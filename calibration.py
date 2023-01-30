@@ -2,6 +2,7 @@ import depthai as dai
 import cv2
 import numpy as np
 from typing import Tuple
+import os
 
 class Calibration:
     def __init__(self, checkerboard_size: Tuple[int, int], square_size: float, device: dai.Device):
@@ -101,6 +102,7 @@ class Calibration:
         self.distortion_coef = np.zeros((1,5))
 
     def save_pose_to_file(self):
+        os.makedirs("config", exist_ok=True)
         mxid = self.device_info.getMxId()
         rot_vec_filename = f"config/rot_vec.{mxid}.npy"
         trans_vec_filename = f"config/trans_vec.{mxid}.npy"

@@ -43,84 +43,52 @@ class BirdsEyeView:
                 cv2.line(self.img, p, p_l, color, 1)
                 cv2.line(self.img, p, p_r, color, 1)
 
-    def make_groups(self):
-        n = 2 # use only first n components
-        distance_threshold = 1.5 # m
-        for camera in self.cameras:
-            for det in camera.detected_objects:
-                det.corresponding_detections = []
-                for other_camera in self.cameras:
-                    # find closest detection
-                    d = np.inf
-                    closest_det = None
-                    for other_det in other_camera.detected_objects:
-                        if other_det.label != det.label:
-                            continue
-                        d_ = np.linalg.norm(det.pos[:,:n] - other_det.pos[:,:n])
-                        if d_ < d:
-                            d = d_
-                            closest_det = other_det
-                    if closest_det is not None and d < distance_threshold:
-                        det.corresponding_detections.append(closest_det)
-                        
-        # keep only double correspondences
-        for camera in self.cameras:
-            for det in camera.detected_objects:
-                det.corresponding_detections = [other_det for other_det in det.corresponding_detections if det in other_det.corresponding_detections]
 
-        # find groups of correspondences
-        groups = []
-        for camera in self.cameras:
-            for det in camera.detected_objects:
-                # find group
-                group = None
-                for g in groups:
-                    if det in g:
-                        group = g
-                        break
-                if group is None:
-                    group = set()
-                    groups.append(group)
-                # add to group
-                group.add(det)
-                for other_det in det.corresponding_detections:
-                    if other_det not in group:
-                        group.add(other_det)
-
+    def make_groups(self, tracks):
+        groups = {}
+        for device_id in tracks:
+            for track in tracks[device_id]:
+                obj_id = track["object_id"]
+                if obj_id not in groups:
+                    groups[obj_id] = [track]
+                else:
+                    groups[obj_id].append(track)
         return groups
 
+    
     def draw_groups(self, groups):
-        for group in groups:
+        for obj_id in groups:
             avg = np.zeros(2)
             label = ""
-            for det in group:
-                label = det.label
-                try: c = self.colors[det.camera_friendly_id - 1]
+            for track in groups[obj_id]:
+                label = track["label"]+f"_{track['object_id']}"
+                try: c = self.colors[track["device_id"] - 1]
                 except: c = (255,255,255)
-                p = (self.world_to_birds_eye @ det.pos).flatten().astype(np.int64)
+                p = (self.world_to_birds_eye @ track["pos"]).flatten().astype(np.int64)
                 avg += p
                 cv2.circle(self.img, p, 2, c, -1)
 
-            avg = (avg/len(group)).astype(np.int64)
+            avg = (avg/len(groups[obj_id])).astype(np.int64)
             cv2.circle(self.img, avg, int(0.25*self.scale), (255, 255, 255), 0)
             cv2.putText(self.img, str(label), avg+np.array([0, int(0.25*self.scale) + 10]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     def draw_history(self):
         for i, groups in enumerate(self.history):
-            for group in groups:
+            for obj_id in groups:
                 avg = np.zeros(2)
-                for det in group:
-                    p = (self.world_to_birds_eye @ det.pos).flatten().astype(np.int64)
+                for track in groups[obj_id]:
+                    p = (self.world_to_birds_eye @ track["pos"]).flatten().astype(np.int64)
                     avg += p
-                avg = (avg/len(group)).astype(np.int64)
+
+                avg = (avg/len(groups[obj_id])).astype(np.int64)
                 c = int(i/self.history.maxlen*50)
                 cv2.circle(self.img, avg, int(i/self.history.maxlen*10), (c, c, c), -1)
 
-    def render(self):
+    def render(self, tracks):
         self.img = np.zeros((self.height, self.width, 3), np.uint8)
         self.draw_coordinate_system()
         self.draw_cameras()
-        groups = self.make_groups()
+        groups = self.make_groups(tracks)
         self.draw_history()
         self.history.append(groups)
         self.draw_groups(groups)

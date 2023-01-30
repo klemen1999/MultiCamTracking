@@ -3,6 +3,7 @@ import depthai as dai
 from birdseyeview import BirdsEyeView
 from camera import Camera
 from typing import List
+from deep_sort_realtime.deepsort_tracker import DeepSort
 
 device_infos = dai.Device.getAllAvailableDevices()
 if len(device_infos) == 0:
@@ -36,6 +37,13 @@ def select_camera(friendly_id: int):
 select_camera(1)
 
 birds_eye_view = BirdsEyeView(cameras, 512, 512, 100)
+tracker = DeepSort(
+    depthai=True,
+    devices=[c.friendly_id for c in cameras],
+    multi_cam_max_dist=2,
+    multi_cam_assoc_coef=0.5, 
+    multi_cam_assoc_thresh=0.7
+)
 
 while True:
     key = cv2.waitKey(1)
@@ -60,7 +68,16 @@ while True:
     for camera in cameras:
         camera.update()
 
-    birds_eye_view.render()
+    all_detections = []
+    for camera in cameras:
+        all_detections.extend(camera.detected_objects)
+
+    tracks = tracker.update_tracks_depthai(all_detections)
+
+    for camera in cameras:
+        camera.render_tracks(tracks[camera.friendly_id])
+
+    birds_eye_view.render(tracks)
 
 
 
