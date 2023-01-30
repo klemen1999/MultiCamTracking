@@ -12,7 +12,7 @@ This example demonstrates calibration and tracking with multiple Luxonis OAK cam
 
 
 ## Usage
-1. Install deep-sort-realtime tracker: 
+1. Install [deep-sort-realtime](https://github.com/levan92/deep_sort_realtime) tracker: 
     ```
     pip install -e deep_sort_realtime
     ```
