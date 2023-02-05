@@ -9,7 +9,6 @@ from typing import List
 from detection import Detection
 from MultiMsgSync import TwoStageHostSeqSync
 
-
 class Camera:
 
     def __init__(self, device_info: dai.DeviceInfo, friendly_id: int, show_video: bool = True):
@@ -27,7 +26,7 @@ class Camera:
         self.mapping_queue = self.device.getOutputQueue(name="mapping", maxSize=1, blocking=False)
         self.nn_queue = self.device.getOutputQueue(name="detection", maxSize=1, blocking=False)
         self.depth_queue = self.device.getOutputQueue(name="depth", maxSize=1, blocking=False)
-        self.rec_queue = self.device.getOutputQueue(name="recognition", maxSize=1, blocking=False)
+        self.emb_queue = self.device.getOutputQueue(name="embedding", maxSize=1, blocking=False)
 
         self.window_name = f"[{self.friendly_id}] Camera - mxid: {self.mxid}"
         self.viz_height, self.viz_width = 360, 640
@@ -54,11 +53,12 @@ class Camera:
 
         # RGB cam -> 'color'
         cam_rgb = pipeline.create(dai.node.ColorCamera)
-        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P) # use THE_4_K for calibration
         cam_rgb.setPreviewSize(640, 640)
         cam_rgb.setInterleaved(False)
         cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
         cam_rgb.setPreviewKeepAspectRatio(False)
+        cam_rgb.setPreviewNumFramesPool(30)
         xout_rgb = pipeline.createXLinkOut()
         xout_rgb.setStreamName("color")
 
@@ -115,7 +115,7 @@ class Camera:
         # Image manip -> crop detections
         image_manip_script = pipeline.create(dai.node.Script)
         spatial_nn.passthrough.link(image_manip_script.inputs["passthrough"])
-        spatial_nn.passthrough.link(image_manip_script.inputs["preview"])
+        cam_rgb.preview.link(image_manip_script.inputs["preview"])
         spatial_nn.out.link(image_manip_script.inputs["dets_in"])
 
         image_manip_script.setScript("""
@@ -132,7 +132,7 @@ class Camera:
                 msgs[seq] = dict()
             msgs[seq][name] = msg
             # To avoid freezing (not necessary for this ObjDet model)
-            if 15 < len(msgs):
+            if 30 < len(msgs):
                 node.warn(f"Removing first element! len {len(msgs)}")
                 msgs.popitem() # Remove first element
         def get_msgs():
@@ -174,26 +174,30 @@ class Camera:
                     correct_bb(det)
                     cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
                     # node.warn(f"Sending {i + 1}. age/gender det. Seq {seq}. Det {det.xmin}, {det.ymin}, {det.xmax}, {det.ymax}")
+                    # cfg.setResize(224, 224)
                     cfg.setResize(128, 256)
                     cfg.setKeepAspectRatio(False)
                     node.io['manip_cfg'].send(cfg)
                     node.io['manip_img'].send(img)
         """)
 
-        # Recognition manip -> resize for embedding
-        recognition_manip = pipeline.create(dai.node.ImageManip)
-        recognition_manip.initialConfig.setResize(128, 256)
-        recognition_manip.setWaitForConfigInput(True)
-        image_manip_script.outputs['manip_cfg'].link(recognition_manip.inputConfig)
-        image_manip_script.outputs['manip_img'].link(recognition_manip.inputImage)
+        # Embedding manip -> resize for embedding
+        embedding_manip = pipeline.create(dai.node.ImageManip)
+        # embedding_manip.initialConfig.setResize(224, 224)
+        embedding_manip.initialConfig.setResize(128, 256)
+        embedding_manip.initialConfig.setFrameType(dai.RawImgFrame.Type.BGR888p)
+        embedding_manip.setWaitForConfigInput(True)
+        image_manip_script.outputs['manip_cfg'].link(embedding_manip.inputConfig)
+        image_manip_script.outputs['manip_img'].link(embedding_manip.inputImage)
 
-        # Recogniton nn -> 'recognition'
-        recognition_nn = pipeline.create(dai.node.NeuralNetwork)
-        recognition_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=6))
-        recognition_manip.out.link(recognition_nn.input)
-        recognition_nn_xout = pipeline.create(dai.node.XLinkOut)
-        recognition_nn_xout.setStreamName("recognition")
-        recognition_nn.out.link(recognition_nn_xout.input)
+        # Embedding nn -> 'embedding'
+        embedding_nn = pipeline.create(dai.node.NeuralNetwork)
+        embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=6))
+        # embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
+        embedding_manip.out.link(embedding_nn.input)
+        embedding_nn_xout = pipeline.create(dai.node.XLinkOut)
+        embedding_nn_xout.setStreamName("embedding")
+        embedding_nn.out.link(embedding_nn_xout.input)
 
         # Still encoder -> 'still'
         still_encoder = pipeline.create(dai.node.VideoEncoder)
@@ -211,7 +215,7 @@ class Camera:
         self.pipeline = pipeline
 
     def update(self):
-        queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.rec_queue]
+        queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.emb_queue]
         for q in queues:
             data = q.tryGet()
             if data:
@@ -225,14 +229,14 @@ class Camera:
         self.frame_depth = msgs["depth"]
         
         detections = msgs["detection"].detections
-        recognitions = msgs["recognition"]
+        embeddings = msgs["embedding"]
 
         self.mapping = self.mapping_queue.tryGet()
         self.detected_objects = []
 
         if len(detections) > 0 and self.mapping is not None:
-            for detection, recognition in zip(detections, recognitions):
-                embedding = np.array(recognition.getFirstLayerFp16())
+            for detection, embedding in zip(detections, embeddings):
+                embedding = np.array(embedding.getFirstLayerFp16())
 
                 try:
                     label = self.label_map[detection.label]

@@ -1,7 +1,7 @@
-# Color frames (ImgFrame), object detection (ImgDetections) and recognition (NNData)
+# Color frames (ImgFrame), object detection (ImgDetections) and embedding (NNData)
 # messages arrive to the host all with some additional delay.
 # For each ImgFrame there's one ImgDetections msg, which has multiple detections, and for each
-# detection there's a NNData msg which contains recognition results.
+# detection there's a NNData msg which contains embedding results.
 
 # How it works:
 # Every ImgFrame, ImgDetections and NNData message has it's own sequence number, by which we can sync messages.
@@ -9,18 +9,18 @@
 class TwoStageHostSeqSync:
     def __init__(self):
         self.msgs = {}
-    # name: color, detection, or recognition
+    # name: color, detection, or embedding
     def add_msg(self, msg, name):
         seq = str(msg.getSequenceNum())
         if seq not in self.msgs:
             self.msgs[seq] = {} # Create directory for msgs
-        if "recognition" not in self.msgs[seq]:
-            self.msgs[seq]["recognition"] = [] # Create recognition array
+        if "embedding" not in self.msgs[seq]:
+            self.msgs[seq]["embedding"] = [] # Create embedding array
 
-        if name == "recognition":
-            # Append recognition msgs to an array
-            self.msgs[seq]["recognition"].append(msg)
-            # print(f'Added recognition seq {seq}, total len {len(self.msgs[seq]["recognition"])}')
+        if name == "embedding":
+            # Append embedding msgs to an array
+            self.msgs[seq]["embedding"].append(msg)
+            # print(f'Added embedding seq {seq}, total len {len(self.msgs[seq]["embedding"])}')
 
         elif name == "detection":
             # Save detection msg in the directory
@@ -44,8 +44,8 @@ class TwoStageHostSeqSync:
             # Check if we have detections, color and depth frame with this sequence number
             if "color" in msgs and "depth" in msgs and "len" in msgs:
 
-                # Check if all detected objects (faces) have finished recognition inference
-                if msgs["len"] == len(msgs["recognition"]):
+                # Check if all detected objects (faces) have finished embedding inference
+                if msgs["len"] == len(msgs["embedding"]):
                     # print(f"Synced msgs with sequence number {seq}", msgs)
 
                     # We have synced msgs, remove previous msgs (memory cleaning)

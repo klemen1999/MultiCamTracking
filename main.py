@@ -38,6 +38,8 @@ select_camera(1)
 
 birds_eye_view = BirdsEyeView(cameras, 512, 512, 100)
 tracker = DeepSort(
+    max_age=1000,
+    nms_max_overlap=1,
     depthai=True,
     devices=[c.friendly_id for c in cameras],
     multi_cam_max_dist=2,
