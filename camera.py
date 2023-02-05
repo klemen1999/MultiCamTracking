@@ -12,6 +12,9 @@ from detection import Detection
 from multi_msg_sync import TwoStageHostSeqSync
 
 class Camera:
+    label_map = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
+        "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
+
 
     def __init__(self, device_info: dai.DeviceInfo, friendly_id: int, show_video: bool = True):
         self.show_video = show_video
@@ -28,7 +31,7 @@ class Camera:
         self.mapping_queue = self.device.getOutputQueue(name="mapping", maxSize=1, blocking=False)
         self.nn_queue = self.device.getOutputQueue(name="detection", maxSize=1, blocking=False)
         self.depth_queue = self.device.getOutputQueue(name="depth", maxSize=1, blocking=False)
-        self.emb_queue = self.device.getOutputQueue(name="embedding", maxSize=1, blocking=False)
+        # self.emb_queue = self.device.getOutputQueue(name="embedding", maxSize=1, blocking=False)
 
         self.window_name = f"[{self.friendly_id}] Camera - mxid: {self.mxid}"
         self.viz_height, self.viz_width = 360, 640
@@ -41,7 +44,7 @@ class Camera:
         self.detected_objects: List[Detection] = []
 
         self.calibration = Calibration((10, 7), 0.0251, self.device)
-        self.sync = TwoStageHostSeqSync()
+        # self.sync = TwoStageHostSeqSync()
         # self.fps_handler = FPSHandler()
 
         print("=== Connected to " + self.device_info.getMxId())
@@ -56,8 +59,9 @@ class Camera:
 
         # RGB cam -> 'color'
         cam_rgb = pipeline.create(dai.node.ColorCamera)
-        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P) # use THE_4_K for calibration
-        cam_rgb.setPreviewSize(640, 640)
+        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K) # use THE_4_K for calibration
+        # cam_rgb.setPreviewSize(640, 640)
+        cam_rgb.setPreviewSize(300, 300)
         cam_rgb.setInterleaved(False)
         cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
         cam_rgb.setPreviewKeepAspectRatio(False)
@@ -87,24 +91,33 @@ class Camera:
         xout_bounding_box_bepth_mapping.setStreamName("mapping")
         
         # Spatial detection network -> 'detection'
-        with open("models/yolov6n.json", "r") as f:
-            data = json.load(f)
-            config = data["nn_config"]["NN_specific_metadata"]
-            self.label_map = data["mappings"]["labels"]
+        # with open("models/yolov6n.json", "r") as f:
+        #     data = json.load(f)
+        #     config = data["nn_config"]["NN_specific_metadata"]
+        #     self.label_map = data["mappings"]["labels"]
 
-        spatial_nn = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
-        spatial_nn.setBlobPath("models/yolov6n.blob")
-        spatial_nn.setConfidenceThreshold(config.get("confidence_threshold", {}))
-        spatial_nn.setNumClasses(config.get("classes", {}))
-        spatial_nn.setCoordinateSize(config.get("coordinates", {}))
-        spatial_nn.setIouThreshold(config.get("iou_threshold", {}))
-        spatial_nn.setAnchors(config.get("anchors", {}))
-        spatial_nn.setAnchorMasks(config.get("anchor_masks", {}))
+        # spatial_nn = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+        # spatial_nn.setBlobPath("models/yolov6n.blob")
+        # spatial_nn.setConfidenceThreshold(config.get("confidence_threshold", {}))
+        # spatial_nn.setNumClasses(config.get("classes", {}))
+        # spatial_nn.setCoordinateSize(config.get("coordinates", {}))
+        # spatial_nn.setIouThreshold(config.get("iou_threshold", {}))
+        # spatial_nn.setAnchors(config.get("anchors", {}))
+        # spatial_nn.setAnchorMasks(config.get("anchor_masks", {}))
+        # spatial_nn.input.setBlocking(False)
+        # spatial_nn.setBoundingBoxScaleFactor(0.2)
+        # spatial_nn.setDepthLowerThreshold(100) # Min 10 centimeters
+        # spatial_nn.setDepthUpperThreshold(5000) # Max 5 meters
+        spatial_nn = pipeline.create(dai.node.MobileNetSpatialDetectionNetwork)
+        spatial_nn.setBlobPath(blobconverter.from_zoo(name='mobilenet-ssd', shaves=6))
+        spatial_nn.setConfidenceThreshold(0.6)
         spatial_nn.input.setBlocking(False)
         spatial_nn.setBoundingBoxScaleFactor(0.2)
-        spatial_nn.setDepthLowerThreshold(100) # Min 10 centimeters
-        spatial_nn.setDepthUpperThreshold(5000) # Max 5 meters
-        
+        spatial_nn.setDepthLowerThreshold(100)
+        spatial_nn.setDepthUpperThreshold(5000)
+        # xout_nn = pipeline.create(dai.node.XLinkOut)
+        # xout_nn.setStreamName("nn")
+
         xout_nn = pipeline.create(dai.node.XLinkOut)
         xout_nn.setStreamName("detection")
 
@@ -116,91 +129,91 @@ class Camera:
         spatial_nn.out.link(xout_nn.input)
 
         # Image manip -> crop detections
-        image_manip_script = pipeline.create(dai.node.Script)
-        spatial_nn.passthrough.link(image_manip_script.inputs["passthrough"])
-        cam_rgb.preview.link(image_manip_script.inputs["preview"])
-        spatial_nn.out.link(image_manip_script.inputs["dets_in"])
+        # image_manip_script = pipeline.create(dai.node.Script)
+        # spatial_nn.passthrough.link(image_manip_script.inputs["passthrough"])
+        # cam_rgb.preview.link(image_manip_script.inputs["preview"])
+        # spatial_nn.out.link(image_manip_script.inputs["dets_in"])
 
-        image_manip_script.setScript("""
-        import time
-        msgs = dict()
-        def add_msg(msg, name, seq = None):
-            global msgs
-            if seq is None:
-                seq = msg.getSequenceNum()
-            seq = str(seq)
-            # node.warn(f"New msg {name}, seq {seq}")
-            # Each seq number has it's own dict of msgs
-            if seq not in msgs:
-                msgs[seq] = dict()
-            msgs[seq][name] = msg
-            # To avoid freezing (not necessary for this ObjDet model)
-            if 30 < len(msgs):
-                node.warn(f"Removing first element! len {len(msgs)}")
-                msgs.popitem() # Remove first element
-        def get_msgs():
-            global msgs
-            seq_remove = [] # Arr of sequence numbers to get deleted
-            for seq, syncMsgs in msgs.items():
-                seq_remove.append(seq) # Will get removed from dict if we find synced msgs pair
-                # node.warn(f"Checking sync {seq}")
-                # Check if we have both detections and color frame with this sequence number
-                if len(syncMsgs) == 2: # 1 frame, 1 detection
-                    for rm in seq_remove:
-                        del msgs[rm]
-                    # node.warn(f"synced {seq}. Removed older sync values. len {len(msgs)}")
-                    return syncMsgs # Returned synced msgs
-            return None
-        def correct_bb(bb):
-            if bb.xmin < 0: bb.xmin = 0.001
-            if bb.ymin < 0: bb.ymin = 0.001
-            if bb.xmax > 1: bb.xmax = 0.999
-            if bb.ymax > 1: bb.ymax = 0.999
-            return bb
-        while True:
-            time.sleep(0.001) # Avoid lazy looping
-            preview = node.io['preview'].tryGet()
-            if preview is not None:
-                add_msg(preview, 'preview')
-            dets = node.io['dets_in'].tryGet()
-            if dets is not None:
-                # TODO: in 2.18.0.0 use dets.getSequenceNum()
-                passthrough = node.io['passthrough'].get()
-                seq = passthrough.getSequenceNum()
-                add_msg(dets, 'dets', seq)
-            sync_msgs = get_msgs()
-            if sync_msgs is not None:
-                img = sync_msgs['preview']
-                dets = sync_msgs['dets']
-                for i, det in enumerate(dets.detections):
-                    cfg = ImageManipConfig()
-                    correct_bb(det)
-                    cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
-                    # node.warn(f"Sending {i + 1}. age/gender det. Seq {seq}. Det {det.xmin}, {det.ymin}, {det.xmax}, {det.ymax}")
-                    # cfg.setResize(224, 224)
-                    cfg.setResize(128, 256)
-                    cfg.setKeepAspectRatio(False)
-                    node.io['manip_cfg'].send(cfg)
-                    node.io['manip_img'].send(img)
-        """)
+        # image_manip_script.setScript("""
+        # import time
+        # msgs = dict()
+        # def add_msg(msg, name, seq = None):
+        #     global msgs
+        #     if seq is None:
+        #         seq = msg.getSequenceNum()
+        #     seq = str(seq)
+        #     # node.warn(f"New msg {name}, seq {seq}")
+        #     # Each seq number has it's own dict of msgs
+        #     if seq not in msgs:
+        #         msgs[seq] = dict()
+        #     msgs[seq][name] = msg
+        #     # To avoid freezing (not necessary for this ObjDet model)
+        #     if 30 < len(msgs):
+        #         node.warn(f"Removing first element! len {len(msgs)}")
+        #         msgs.popitem() # Remove first element
+        # def get_msgs():
+        #     global msgs
+        #     seq_remove = [] # Arr of sequence numbers to get deleted
+        #     for seq, syncMsgs in msgs.items():
+        #         seq_remove.append(seq) # Will get removed from dict if we find synced msgs pair
+        #         # node.warn(f"Checking sync {seq}")
+        #         # Check if we have both detections and color frame with this sequence number
+        #         if len(syncMsgs) == 2: # 1 frame, 1 detection
+        #             for rm in seq_remove:
+        #                 del msgs[rm]
+        #             # node.warn(f"synced {seq}. Removed older sync values. len {len(msgs)}")
+        #             return syncMsgs # Returned synced msgs
+        #     return None
+        # def correct_bb(bb):
+        #     if bb.xmin < 0: bb.xmin = 0.001
+        #     if bb.ymin < 0: bb.ymin = 0.001
+        #     if bb.xmax > 1: bb.xmax = 0.999
+        #     if bb.ymax > 1: bb.ymax = 0.999
+        #     return bb
+        # while True:
+        #     time.sleep(0.001) # Avoid lazy looping
+        #     preview = node.io['preview'].tryGet()
+        #     if preview is not None:
+        #         add_msg(preview, 'preview')
+        #     dets = node.io['dets_in'].tryGet()
+        #     if dets is not None:
+        #         # TODO: in 2.18.0.0 use dets.getSequenceNum()
+        #         passthrough = node.io['passthrough'].get()
+        #         seq = passthrough.getSequenceNum()
+        #         add_msg(dets, 'dets', seq)
+        #     sync_msgs = get_msgs()
+        #     if sync_msgs is not None:
+        #         img = sync_msgs['preview']
+        #         dets = sync_msgs['dets']
+        #         for i, det in enumerate(dets.detections):
+        #             cfg = ImageManipConfig()
+        #             correct_bb(det)
+        #             cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
+        #             # node.warn(f"Sending {i + 1}. age/gender det. Seq {seq}. Det {det.xmin}, {det.ymin}, {det.xmax}, {det.ymax}")
+        #             # cfg.setResize(224, 224)
+        #             cfg.setResize(128, 256)
+        #             cfg.setKeepAspectRatio(False)
+        #             node.io['manip_cfg'].send(cfg)
+        #             node.io['manip_img'].send(img)
+        # """)
 
-        # Embedding manip -> resize for embedding
-        embedding_manip = pipeline.create(dai.node.ImageManip)
-        # embedding_manip.initialConfig.setResize(224, 224)
-        embedding_manip.initialConfig.setResize(128, 256)
-        embedding_manip.initialConfig.setFrameType(dai.RawImgFrame.Type.BGR888p)
-        embedding_manip.setWaitForConfigInput(True)
-        image_manip_script.outputs['manip_cfg'].link(embedding_manip.inputConfig)
-        image_manip_script.outputs['manip_img'].link(embedding_manip.inputImage)
+        # # Embedding manip -> resize for embedding
+        # embedding_manip = pipeline.create(dai.node.ImageManip)
+        # # embedding_manip.initialConfig.setResize(224, 224)
+        # embedding_manip.initialConfig.setResize(128, 256)
+        # embedding_manip.initialConfig.setFrameType(dai.RawImgFrame.Type.BGR888p)
+        # embedding_manip.setWaitForConfigInput(True)
+        # image_manip_script.outputs['manip_cfg'].link(embedding_manip.inputConfig)
+        # image_manip_script.outputs['manip_img'].link(embedding_manip.inputImage)
 
-        # Embedding nn -> 'embedding'
-        embedding_nn = pipeline.create(dai.node.NeuralNetwork)
-        embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=6))
-        # embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
-        embedding_manip.out.link(embedding_nn.input)
-        embedding_nn_xout = pipeline.create(dai.node.XLinkOut)
-        embedding_nn_xout.setStreamName("embedding")
-        embedding_nn.out.link(embedding_nn_xout.input)
+        # # Embedding nn -> 'embedding'
+        # embedding_nn = pipeline.create(dai.node.NeuralNetwork)
+        # embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=6))
+        # # embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
+        # embedding_manip.out.link(embedding_nn.input)
+        # embedding_nn_xout = pipeline.create(dai.node.XLinkOut)
+        # embedding_nn_xout.setStreamName("embedding")
+        # embedding_nn.out.link(embedding_nn_xout.input)
 
         # Still encoder -> 'still'
         still_encoder = pipeline.create(dai.node.VideoEncoder)
@@ -218,31 +231,36 @@ class Camera:
         self.pipeline = pipeline
 
     def update(self):
-        queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.emb_queue]
+        #queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.emb_queue]
+        queues = [self.rgb_queue, self.nn_queue, self.depth_queue]
+        msgs = {}
         for q in queues:
             data = q.tryGet()
             if data:
-                self.sync.add_msg(data, q.getName())
+                msgs[q.getName()] = data
+                # self.sync.add_msg(data, q.getName())
 
-        msgs = self.sync.get_msgs()
-        if msgs == None:
-            self.frame_color = None
-            self.frame_depth = None
-            # self.fps_handler.nextIter()
+        # msgs = self.sync.get_msgs()
+        # if msgs == None:
+        #     self.frame_color = None
+        #     self.frame_depth = None
+        #     # self.fps_handler.nextIter()
+        #     return
+        if len(msgs) != 3:
             return
 
         self.frame_color = msgs["color"]
         self.frame_depth = msgs["depth"]
         
         detections = msgs["detection"].detections
-        embeddings = msgs["embedding"]
+        embeddings = [np.ones(256) for _ in detections] #msgs["embedding"]
 
         self.mapping = self.mapping_queue.tryGet()
         self.detected_objects = []
 
         if len(detections) > 0 and self.mapping is not None:
             for detection, embedding in zip(detections, embeddings):
-                embedding = np.array(embedding.getFirstLayerFp16())
+                # embedding = np.array(embedding.getFirstLayerFp16())
 
                 try:
                     label = self.label_map[detection.label]

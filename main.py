@@ -42,14 +42,15 @@ multi_cam_sync = MultiCameraSync(devices, 0.05)
 tracker = Tracker(
     devices = devices,
     multi_cam_max_dist=2,
-    multi_cam_assoc_coef=0.5, 
+    multi_cam_assoc_coef=0, #0.5 
     multi_cam_assoc_thresh=0.7,
     embedder=None,
     max_age=1000,
     nms_max_overlap=1,
 )
 birds_eye_view = BirdsEyeView(cameras, 512, 512, 100)
-
+import time
+time.sleep(2)
 while True:
     key = cv2.waitKey(1)
 
@@ -85,6 +86,12 @@ while True:
     # all_detections = {}
     # for camera in cameras:
     #     all_detections[camera.friendly_id] = camera.detected_objects
+    # for device_id in msgs:
+    #     dets = msgs[device_id]["detections"]
+    #     print("Device id:", device_id)
+    #     for det in dets:
+    #         print(f"LABEL: {det.label} POS: {det.pos}")
+    # print("END")
 
     tracks = tracker.update(msgs)
 
