@@ -2,12 +2,14 @@ import depthai as dai
 import blobconverter
 import cv2
 import json
-from calibration import Calibration
 import time
 import numpy as np
 from typing import List
+# from depthai_sdk.fps import FPSHandler 
+
+from calibration import Calibration
 from detection import Detection
-from MultiMsgSync import TwoStageHostSeqSync
+from multi_msg_sync import TwoStageHostSeqSync
 
 class Camera:
 
@@ -40,6 +42,7 @@ class Camera:
 
         self.calibration = Calibration((10, 7), 0.0251, self.device)
         self.sync = TwoStageHostSeqSync()
+        # self.fps_handler = FPSHandler()
 
         print("=== Connected to " + self.device_info.getMxId())
 
@@ -223,6 +226,9 @@ class Camera:
 
         msgs = self.sync.get_msgs()
         if msgs == None:
+            self.frame_color = None
+            self.frame_depth = None
+            # self.fps_handler.nextIter()
             return
 
         self.frame_color = msgs["color"]
@@ -249,14 +255,16 @@ class Camera:
 
                     self.detected_objects.append(
                         Detection(
-                            dai_det = detection, # need bounding box and confidence data
+                            bbox = np.array([detection.xmin, detection.ymin, detection.xmax, detection.ymax]),
+                            confidence = detection.confidence,
                             label = label,
                             pos = pos_world_frame,
-                            embedding= embedding,
+                            embedding = embedding,
+                            spatial_coords = np.array([detection.spatialCoordinates.x, detection.spatialCoordinates.y, detection.spatialCoordinates.z]),
                             camera_friendly_id = self.friendly_id
                         )
                     )
-
+        # self.fps_handler.nextIter()
 
     def render_tracks(self, tracks):
         if self.show_detph:
@@ -276,7 +284,7 @@ class Camera:
 
         if len(tracks) > 0 and self.mapping is not None:
             roi_datas = self.mapping.getConfigData()
-            for roi_data, detection in zip(roi_datas, tracks):
+            for roi_data, det in zip(roi_datas, tracks):
                 roi = roi_data.roi
                 roi = roi.denormalize(self.viz_width, self.viz_height)
                 top_left = roi.topLeft()
@@ -286,20 +294,21 @@ class Camera:
                 xmax = int(bottom_right.x)
                 ymax = int(bottom_right.y)
 
-                dai_det = detection["dai_det"]
-
-                x1 = int(dai_det.xmin * self.viz_width)
-                x2 = int(dai_det.xmax * self.viz_width)
-                y1 = int(dai_det.ymin * self.viz_height)
-                y2 = int(dai_det.ymax * self.viz_height)
+                x1 = int(det["bbox"][0] * self.viz_width)
+                x2 = int(det["bbox"][2] * self.viz_width)
+                y1 = int(det["bbox"][1] * self.viz_height)
+                y2 = int(det["bbox"][3] * self.viz_height)
 
                 cv2.rectangle(visualization, (xmin, ymin), (xmax, ymax), (100, 0, 0), 2)
                 cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                cv2.putText(visualization, str(detection["label"])+f"_{detection['object_id']}", (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, "{:.2f}".format(dai_det.confidence*100), (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, f"X: {int(dai_det.spatialCoordinates.x)} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, f"Y: {int(dai_det.spatialCoordinates.y)} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, f"Z: {int(dai_det.spatialCoordinates.z)} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+                cv2.putText(visualization, str(det["label"])+f"_{det['object_id']}", (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+                cv2.putText(visualization, "{:.2f}".format(det["confidence"]*100), (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+                cv2.putText(visualization, f"X: {int(det['spatial_coords'][0])} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+                cv2.putText(visualization, f"Y: {int(det['spatial_coords'][1])} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+                cv2.putText(visualization, f"Z: {int(det['spatial_coords'][2])} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+
+        # fps = self.fps_handler.fps()
+        # cv2.putText(visualization, f"Fps: {fps}", (5,15), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
 
         if self.show_video:
             cv2.imshow(self.window_name, visualization)

@@ -23,6 +23,7 @@ EMBEDDER_CHOICES = [
     "clip_ViT-B/16",
 ]
 
+
 class DeepSort(object):
     def __init__(
         self,
@@ -42,11 +43,6 @@ class DeepSort(object):
         embedder_wts=None,
         polygon=False,
         today=None,
-        depthai=False,
-        multi_cam_max_dist=2,
-        multi_cam_assoc_coef= 0.5,
-        multi_cam_assoc_thresh=0.7,
-        devices=[] #ids of all active devices
     ):
         """
 
@@ -86,193 +82,76 @@ class DeepSort(object):
             Whether detections are polygons (e.g. oriented bounding boxes)
         today: Optional[datetime.date]
             Provide today's date, for naming of tracks. Argument for deep_sort_realtime.deep_sort.tracker.Tracker.
-        depthai: bool = False
-            Weather we use original implementation or adaptation for depthai where we perform embedding on device.
-        multi_cam_max_dist: int = 2
-            Threshold for distance between objects to be treated as same in real world (in meters). Only used if depthai=True.
-        multi_cam_assoc_coef: int = 0.5
-            Ratio between cosine similarity and euclidian distance importance (1 means we only use cosine, 0 we only use euclidian). Only used if depthai=True
-        multi_cam_assoc_thresh: int = 0.7
-            Threshold for lowest probability that two detections are of same object. Only used if depthai=True
-        devices: [int] = []
-            List of ids of all devices.
         """
         self.nms_max_overlap = nms_max_overlap
-  
-        if depthai:
+        metric = nn_matching.NearestNeighborDistanceMetric(
+            "cosine", max_cosine_distance, nn_budget
+        )
+        self.tracker = Tracker(
+            metric,
+            max_iou_distance=max_iou_distance,
+            max_age=max_age,
+            n_init=n_init,
+            override_track_class=override_track_class,
+            today=today,
+            gating_only_position=gating_only_position,
+        )
 
-            self.devices = devices
-            self.multi_cam_max_dist = multi_cam_max_dist
-            self.multi_cam_assoc_coef = multi_cam_assoc_coef
-            self.multi_cam_assoc_thresh = multi_cam_assoc_thresh
-
-            self.trackers = {}
-            for device_id in self.devices:
-                self.trackers[device_id] = Tracker(
-                    metric = nn_matching.NearestNeighborDistanceMetric(
-                        "cosine", max_cosine_distance, nn_budget
-                    ),
-                    max_iou_distance=max_iou_distance,
-                    max_age = max_age,
-                    n_init=n_init,
-                    override_track_class=None,
-                    today = today,
+        if embedder is not None:
+            if embedder not in EMBEDDER_CHOICES:
+                raise Exception(f"Embedder {embedder} is not a valid choice.")
+            if embedder == "mobilenet":
+                from deep_sort_realtime.embedder.embedder_pytorch import (
+                    MobileNetv2_Embedder as Embedder,
                 )
+
+                self.embedder = Embedder(
+                    half=half,
+                    max_batch_size=16,
+                    bgr=bgr,
+                    gpu=embedder_gpu,
+                    model_wts_path=embedder_wts,
+                )
+            elif embedder == 'torchreid':
+                from deep_sort_realtime.embedder.embedder_pytorch import TorchReID_Embedder as Embedder
+
+                self.embedder = Embedder(
+                    bgr=bgr, 
+                    gpu=embedder_gpu,
+                    model_name=embedder_model_name,
+                    model_wts_path=embedder_wts,
+                )
+
+            elif embedder.startswith('clip_'):
+                from deep_sort_realtime.embedder.embedder_clip import (
+                    Clip_Embedder as Embedder,
+                )
+
+                model_name = "_".join(embedder.split("_")[1:])
+                self.embedder = Embedder(
+                    model_name=model_name,
+                    model_wts_path=embedder_wts,
+                    max_batch_size=16,
+                    bgr=bgr,
+                    gpu=embedder_gpu,
+                )
+
         else:
-            metric = nn_matching.NearestNeighborDistanceMetric(
-                "cosine", max_cosine_distance, nn_budget
-            )
-            self.tracker = Tracker(
-                metric,
-                max_iou_distance=max_iou_distance,
-                max_age=max_age,
-                n_init=n_init,
-                override_track_class=override_track_class,
-                today=today,
-                gating_only_position=gating_only_position,
-            )
-
-
-
-            if embedder is not None:
-                if embedder not in EMBEDDER_CHOICES:
-                    raise Exception(f"Embedder {embedder} is not a valid choice.")
-                if embedder == "mobilenet":
-                    from deep_sort_realtime.embedder.embedder_pytorch import (
-                        MobileNetv2_Embedder as Embedder,
-                    )
-
-                    self.embedder = Embedder(
-                        half=half,
-                        max_batch_size=16,
-                        bgr=bgr,
-                        gpu=embedder_gpu,
-                        model_wts_path=embedder_wts,
-                    )
-                elif embedder == 'torchreid':
-                    from deep_sort_realtime.embedder.embedder_pytorch import TorchReID_Embedder as Embedder
-
-                    self.embedder = Embedder(
-                        bgr=bgr, 
-                        gpu=embedder_gpu,
-                        model_name=embedder_model_name,
-                        model_wts_path=embedder_wts,
-                    )
-
-                elif embedder.startswith('clip_'):
-                    from deep_sort_realtime.embedder.embedder_clip import (
-                        Clip_Embedder as Embedder,
-                    )
-
-                    model_name = "_".join(embedder.split("_")[1:])
-                    self.embedder = Embedder(
-                        model_name=model_name,
-                        model_wts_path=embedder_wts,
-                        max_batch_size=16,
-                        bgr=bgr,
-                        gpu=embedder_gpu,
-                    )
-
-            else:
-                self.embedder = None
-            self.polygon = polygon
-            logger.info("DeepSort Tracker initialised")
-            logger.info(f"- max age: {max_age}")
-            logger.info(f"- appearance threshold: {max_cosine_distance}")
-            logger.info(
-                f'- nms threshold: {"OFF" if self.nms_max_overlap==1.0 else self.nms_max_overlap }'
-            )
-            logger.info(f"- max num of appearance features: {nn_budget}")
-            logger.info(
-                f'- overriding track class : {"No" if override_track_class is None else "Yes"}'
-            )
-            logger.info(f'- today given : {"No" if today is None else "Yes"}')
-            logger.info(f'- in-build embedder : {"No" if self.embedder is None else "Yes"}')
-            logger.info(f'- polygon detections : {"No" if polygon is False else "Yes"}')
-
-    
-    # NOTE: adapted for depthai use case
-    def update_tracks_depthai(self, raw_detections):
-        """Run multi-target tracker on a particular sequence. Adapted for depthai use case
-
-        Parameters
-        ----------
-        raw_detections: List[ Detection ]
-            List of detections, each has attributes 
-            [dai_det: depthai.ImgDetections, label: str, pos: np.ndarray, embedding: np.ndarray, camera_friendly_id: int]
-        Returns
-        -------
-        dictionary with list of active tracks for each device
-
-        """
-        detections = self.create_detections_depthai(raw_detections)
-
-        for device_id in self.devices:
-            curr_dets = [d for d in detections if d.others["device_id"] == device_id]
-            boxes = np.array([d.ltwh for d in detections if d.others["device_id"] == device_id])
-            scores = np.array([d.confidence for d in detections if d.others["device_id"] == device_id])
-
-            # Run non-maxima suppression
-            indices = non_max_suppression(boxes, self.nms_max_overlap, scores)
-            curr_dets = [curr_dets[i] for i in indices]
-
-            # Update trackers
-            self.trackers[device_id].predict()
-            self.trackers[device_id].update(curr_dets)
-
-        # Filter out non active tracks
-        active_tracks = []
-        for device_id in self.devices:
-            for track in self.trackers[device_id].tracks:
-                if not track.is_confirmed() or track.time_since_update > 0:
-                    continue
-                active_tracks.append(track)
-
-        output = {device_id: [] for device_id in self.devices}
-        if len(active_tracks) == 0:
-            return output
-
-        probs = self.find_probs_of_same_ids(active_tracks)
-        probs[probs < self.multi_cam_assoc_coef] = 0
-
-        # for each track check associated tracks
-        assoc_tracks = {}
-        for i, prob in enumerate(probs):
-            curr_max = prob.max()
-            if curr_max != 0:
-                assoc_tracks[i] = set(np.where(prob == curr_max)[0])
-                assoc_tracks[i].add(i)
-            else: # if curr_max == 0 then this track is not associated with any other track from other cameras
-                assoc_tracks[i] = set([i])
-
-        # merge associated tracks into groups (1 group == 1 real life object)
-        groups = []
-        for i in range(len(active_tracks)):
-            curr_set = assoc_tracks[i]
-            joined = False
-            for g in groups:
-                if len(g.intersection(curr_set)):
-                    g.union(curr_set)
-                    joined = True
-                    break
-            if not joined:
-                groups.append(curr_set)
-
-        # return merged active tracks
-        for i, g in enumerate(groups):
-            for track_id in g:
-                curr_track = active_tracks[track_id]
-                curr_device = curr_track.others["device_id"]
-                output[curr_device].append({
-                    "object_id": i,
-                    "device_id": curr_device,
-                    "dai_det": curr_track.others["dai_det"],
-                    "pos": np.expand_dims(curr_track.others["pos"], axis=-1),
-                    "label": curr_track.det_class,
-                })
-
-        return output
-
+            self.embedder = None
+        self.polygon = polygon
+        logger.info("DeepSort Tracker initialised")
+        logger.info(f"- max age: {max_age}")
+        logger.info(f"- appearance threshold: {max_cosine_distance}")
+        logger.info(
+            f'- nms threshold: {"OFF" if self.nms_max_overlap==1.0 else self.nms_max_overlap }'
+        )
+        logger.info(f"- max num of appearance features: {nn_budget}")
+        logger.info(
+            f'- overriding track class : {"No" if override_track_class is None else "Yes"}'
+        )
+        logger.info(f'- today given : {"No" if today is None else "Yes"}')
+        logger.info(f'- in-build embedder : {"No" if self.embedder is None else "Yes"}')
+        logger.info(f'- polygon detections : {"No" if polygon is False else "Yes"}')
 
     def update_tracks(self, raw_detections, embeds=None, frame=None, today=None, others=None, instance_masks=None):
 
@@ -350,36 +229,6 @@ class DeepSort(object):
 
         return self.tracker.tracks
 
-    def find_probs_of_same_ids(self, tracks):
-        n = len(tracks)
-        cos_sim_mat = np.zeros((n,n)) # cosine similarity between objects features
-        dist_mat = np.zeros((n,n)) # distance between tracks in real space
-        cam_coef_mat = np.ones((n,n)) # 0 means different object
-
-        for i in range(n):
-            for j in range(n):
-                # cos_sim_mat[i,j] = self.cos_similarity(tracks[i].get_feature_vector(), 
-                #     tracks[j].get_feature_vector())
-                cos_sim_mat[i,j] = self.cos_similarity(tracks[i].get_feature(), tracks[j].get_feature())
-                dist_mat[i,j] = np.linalg.norm(tracks[i].others["pos"] - tracks[j].others["pos"])
-                if tracks[i].others["device_id"] == tracks[j].others["device_id"]: # if from same device than different object
-                    cam_coef_mat[i,j] = 0
-                if tracks[i].det_class != tracks[j].det_class: # if different class than different object
-                    cam_coef_mat[i,j] = 0
-
-        # normalize distances between 0 and max value
-        dist_mat[dist_mat > self.multi_cam_max_dist] = self.multi_cam_max_dist
-        denominator = (self.multi_cam_max_dist - dist_mat.min())
-        if denominator != 0:
-            dist_mat = (dist_mat - dist_mat.min()) / denominator
-
-        # remap so closest tracks have higest values
-        dist_mat = np.where(dist_mat == 0, 1, 1-dist_mat)
-
-        result = cam_coef_mat * np.add(self.multi_cam_assoc_coef * cos_sim_mat, 
-            (1-self.multi_cam_assoc_coef)*dist_mat)
-        return result
-
     def refresh_track_ids(self):
         self.tracker._next_id
 
@@ -399,25 +248,6 @@ class DeepSort(object):
     def generate_embeds_poly(self, frame, polygons, bounding_rects):
         crops = self.crop_poly_pad_black(frame, polygons, bounding_rects)
         return self.embedder.predict(crops)
-    
-    # NOTE: adapted for depthai use case
-    def create_detections_depthai(self, detections):
-        detection_list = []
-        for det in detections:
-            detection_list.append(
-                Detection(
-                    ltwh = det.bbox_to_ltwh(),
-                    confidence = det.dai_det.confidence,
-                    feature = det.embedding,
-                    class_name = det.label,
-                    others = {
-                        "device_id": det.camera_friendly_id,
-                        "dai_det": det.dai_det,
-                        "pos": np.squeeze(det.pos),
-                    }
-                )
-            )
-        return detection_list
 
     def create_detections(self, raw_dets, embeds, instance_masks=None, others=None):
         detection_list = []
@@ -446,13 +276,6 @@ class DeepSort(object):
                 Detection(bbox, score, embed, class_name=cl, others=raw_polygon)
             )
         return detection_list
-
-    @staticmethod
-    def cos_similarity(a, b):
-        denominator = np.linalg.norm(a) * np.linalg.norm(b)
-        if denominator == 0:
-            return np.nan
-        return np.dot(a, b) / denominator
 
     @staticmethod
     def process_polygons(raw_polygons):

@@ -3,16 +3,16 @@ from typing import List
 import depthai as dai
 
 class Detection:
-    def __init__(self, dai_det: dai.ImgDetections, label: str, pos: np.ndarray, embedding: np.ndarray, camera_friendly_id: int):
-        self.dai_det = dai_det
+    def __init__(self, bbox: np.ndarray, confidence: float, label: str, pos: np.ndarray,
+        embedding: np.ndarray, spatial_coords: np.ndarray, camera_friendly_id: int):
+        
+        self.bbox = bbox # [x_min, y_min, x_max, y_max]
+        self.confidence = confidence
         self.label = label
         self.pos = pos
         self.embedding = embedding
+        self.spatial_coords = spatial_coords # [x, y, z]
         self.camera_friendly_id = camera_friendly_id
 
-    def bbox_xyxy(self):
-        return np.array([self.dai_det.xmin, self.dai_det.ymin, self.dai_det.xmax, self.dai_det.ymax])
-
     def bbox_to_ltwh(self): # [left, top, width, height]
-        bbox = self.bbox_xyxy()
-        return np.array([bbox[0], bbox[1], bbox[2]-bbox[0], bbox[3]-bbox[1]])
+        return np.array([self.bbox[0], self.bbox[1], self.bbox[2]-self.bbox[0], self.bbox[3]-self.bbox[1]])
