@@ -128,93 +128,6 @@ class Camera:
         spatial_nn.boundingBoxMapping.link(xout_bounding_box_bepth_mapping.input)
         spatial_nn.out.link(xout_nn.input)
 
-        # Image manip -> crop detections
-        # image_manip_script = pipeline.create(dai.node.Script)
-        # spatial_nn.passthrough.link(image_manip_script.inputs["passthrough"])
-        # cam_rgb.preview.link(image_manip_script.inputs["preview"])
-        # spatial_nn.out.link(image_manip_script.inputs["dets_in"])
-
-        # image_manip_script.setScript("""
-        # import time
-        # msgs = dict()
-        # def add_msg(msg, name, seq = None):
-        #     global msgs
-        #     if seq is None:
-        #         seq = msg.getSequenceNum()
-        #     seq = str(seq)
-        #     # node.warn(f"New msg {name}, seq {seq}")
-        #     # Each seq number has it's own dict of msgs
-        #     if seq not in msgs:
-        #         msgs[seq] = dict()
-        #     msgs[seq][name] = msg
-        #     # To avoid freezing (not necessary for this ObjDet model)
-        #     if 30 < len(msgs):
-        #         node.warn(f"Removing first element! len {len(msgs)}")
-        #         msgs.popitem() # Remove first element
-        # def get_msgs():
-        #     global msgs
-        #     seq_remove = [] # Arr of sequence numbers to get deleted
-        #     for seq, syncMsgs in msgs.items():
-        #         seq_remove.append(seq) # Will get removed from dict if we find synced msgs pair
-        #         # node.warn(f"Checking sync {seq}")
-        #         # Check if we have both detections and color frame with this sequence number
-        #         if len(syncMsgs) == 2: # 1 frame, 1 detection
-        #             for rm in seq_remove:
-        #                 del msgs[rm]
-        #             # node.warn(f"synced {seq}. Removed older sync values. len {len(msgs)}")
-        #             return syncMsgs # Returned synced msgs
-        #     return None
-        # def correct_bb(bb):
-        #     if bb.xmin < 0: bb.xmin = 0.001
-        #     if bb.ymin < 0: bb.ymin = 0.001
-        #     if bb.xmax > 1: bb.xmax = 0.999
-        #     if bb.ymax > 1: bb.ymax = 0.999
-        #     return bb
-        # while True:
-        #     time.sleep(0.001) # Avoid lazy looping
-        #     preview = node.io['preview'].tryGet()
-        #     if preview is not None:
-        #         add_msg(preview, 'preview')
-        #     dets = node.io['dets_in'].tryGet()
-        #     if dets is not None:
-        #         # TODO: in 2.18.0.0 use dets.getSequenceNum()
-        #         passthrough = node.io['passthrough'].get()
-        #         seq = passthrough.getSequenceNum()
-        #         add_msg(dets, 'dets', seq)
-        #     sync_msgs = get_msgs()
-        #     if sync_msgs is not None:
-        #         img = sync_msgs['preview']
-        #         dets = sync_msgs['dets']
-        #         for i, det in enumerate(dets.detections):
-        #             cfg = ImageManipConfig()
-        #             correct_bb(det)
-        #             cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
-        #             # node.warn(f"Sending {i + 1}. age/gender det. Seq {seq}. Det {det.xmin}, {det.ymin}, {det.xmax}, {det.ymax}")
-        #             # cfg.setResize(224, 224)
-        #             cfg.setResize(128, 256)
-        #             cfg.setKeepAspectRatio(False)
-        #             node.io['manip_cfg'].send(cfg)
-        #             node.io['manip_img'].send(img)
-        # """)
-
-        # # Embedding manip -> resize for embedding
-        # embedding_manip = pipeline.create(dai.node.ImageManip)
-        # # embedding_manip.initialConfig.setResize(224, 224)
-        # embedding_manip.initialConfig.setResize(128, 256)
-        # embedding_manip.initialConfig.setFrameType(dai.RawImgFrame.Type.BGR888p)
-        # embedding_manip.setWaitForConfigInput(True)
-        # image_manip_script.outputs['manip_cfg'].link(embedding_manip.inputConfig)
-        # image_manip_script.outputs['manip_img'].link(embedding_manip.inputImage)
-
-        # # Embedding nn -> 'embedding'
-        # embedding_nn = pipeline.create(dai.node.NeuralNetwork)
-        # embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=6))
-        # # embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
-        # embedding_manip.out.link(embedding_nn.input)
-        # embedding_nn_xout = pipeline.create(dai.node.XLinkOut)
-        # embedding_nn_xout.setStreamName("embedding")
-        # embedding_nn.out.link(embedding_nn_xout.input)
-
         # Still encoder -> 'still'
         still_encoder = pipeline.create(dai.node.VideoEncoder)
         still_encoder.setDefaultProfilePreset(1, dai.VideoEncoderProperties.Profile.MJPEG)
@@ -253,7 +166,8 @@ class Camera:
         self.frame_depth = msgs["depth"]
         
         detections = msgs["detection"].detections
-        embeddings = [np.ones(256) for _ in detections] #msgs["embedding"]
+        embeddings = self.get_embeddings(self.frame_color.getCvFrame(), detections)
+        #embeddings = [np.ones(256) for _ in detections] #msgs["embedding"]
 
         self.mapping = self.mapping_queue.tryGet()
         self.detected_objects = []
@@ -261,7 +175,8 @@ class Camera:
         if len(detections) > 0 and self.mapping is not None:
             for detection, embedding in zip(detections, embeddings):
                 # embedding = np.array(embedding.getFirstLayerFp16())
-
+                if np.all((embedding==0)):
+                    embedding[0] = 1
                 try:
                     label = self.label_map[detection.label]
                 except:
@@ -369,3 +284,21 @@ class Camera:
             cv2.waitKey()
 
         return still_rgb
+
+    def get_embeddings(self, frame, detections):
+        embeddings = []
+        W, H = frame.shape[:2]
+        for det in detections:
+            x1 = int(det.xmin * W)
+            x2 = int(det.xmax * W)
+            y1 = int(det.ymin * H)
+            y2 = int(det.ymax * H)
+            # print(x1, x2, y1, y2)
+            box = frame[x1:x2, y1:y2, :]
+            embedding = []
+            for i in range(3):
+                hist,bins = np.histogram(box[:,:,i], bins=range(0,256))
+                embedding.extend(hist)
+
+            embeddings.append(np.array(embedding))
+        return embeddings
