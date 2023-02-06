@@ -1,4 +1,5 @@
 import cv2
+import time
 import depthai as dai
 from birdseyeview import BirdsEyeView
 from camera import Camera
@@ -49,8 +50,9 @@ tracker = Tracker(
     nms_max_overlap=1,
 )
 birds_eye_view = BirdsEyeView(cameras, 512, 512, 100)
-import time
-time.sleep(2)
+
+time.sleep(2) # wait for cameras to settle in
+
 while True:
     key = cv2.waitKey(1)
 
@@ -82,23 +84,13 @@ while True:
     msgs = multi_cam_sync.get_msgs()
     if not msgs:
         continue
-    
-    # all_detections = {}
-    # for camera in cameras:
-    #     all_detections[camera.friendly_id] = camera.detected_objects
-    # for device_id in msgs:
-    #     dets = msgs[device_id]["detections"]
-    #     print("Device id:", device_id)
-    #     for det in dets:
-    #         print(f"LABEL: {det.label} POS: {det.pos}")
-    # print("END")
 
-    tracks = tracker.update(msgs)
+    tracks, objects = tracker.update(msgs)
 
     for camera in cameras:
         camera.render_tracks(tracks[camera.friendly_id])
 
-    birds_eye_view.render(tracks)
+    birds_eye_view.render(tracks, objects)
 
 
 

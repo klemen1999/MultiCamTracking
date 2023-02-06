@@ -42,56 +42,41 @@ class BirdsEyeView:
                 cv2.circle(self.img, p, 5, color, -1)
                 cv2.line(self.img, p, p_l, color, 1)
                 cv2.line(self.img, p, p_r, color, 1)
+    
+    def to_birdseye(self, pos):
+        return (self.world_to_birds_eye @ pos).flatten().astype(np.int64)
+    
+    def draw_history(self):
+        for i, group in enumerate(self.history):
+            for obj in group:
+                c = int(i/self.history.maxlen*50)
+                p = self.to_birdseye(obj.pos)
+                cv2.circle(self.img, p, int(i/self.history.maxlen*10), (c, c, c), -1)
 
-
-    def make_groups(self, tracks):
-        groups = {}
+    def draw_objects(self, tracks, objects):
+        # draw individual tracks
         for device_id in tracks:
             for track in tracks[device_id]:
-                obj_id = track["object_id"]
-                if obj_id not in groups:
-                    groups[obj_id] = [track]
-                else:
-                    groups[obj_id].append(track)
-        return groups
-
-    
-    def draw_groups(self, groups):
-        for obj_id in groups:
-            avg = np.zeros(2)
-            label = ""
-            for track in groups[obj_id]:
-                label = track["label"]+f"_{track['object_id']}"
-                try: c = self.colors[track["device_id"] - 1]
+                p = self.to_birdseye(track["pos"])
+                try: c = self.colors[device_id - 1]
                 except: c = (255,255,255)
-                p = (self.world_to_birds_eye @ track["pos"]).flatten().astype(np.int64)
-                avg += p
                 cv2.circle(self.img, p, 2, c, -1)
+        # draw objects
+        for obj in objects:
+            p = self.to_birdseye(obj.pos)
+            label = f"{obj.label}_{obj.id}"
+            cv2.circle(self.img, p, int(0.25*self.scale), (255, 255, 255), 0)
+            cv2.putText(self.img, label, p+np.array([0, int(0.25*self.scale) + 10]), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            avg = (avg/len(groups[obj_id])).astype(np.int64)
-            cv2.circle(self.img, avg, int(0.25*self.scale), (255, 255, 255), 0)
-            cv2.putText(self.img, str(label), avg+np.array([0, int(0.25*self.scale) + 10]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-    def draw_history(self):
-        for i, groups in enumerate(self.history):
-            for obj_id in groups:
-                avg = np.zeros(2)
-                for track in groups[obj_id]:
-                    p = (self.world_to_birds_eye @ track["pos"]).flatten().astype(np.int64)
-                    avg += p
-
-                avg = (avg/len(groups[obj_id])).astype(np.int64)
-                c = int(i/self.history.maxlen*50)
-                cv2.circle(self.img, avg, int(i/self.history.maxlen*10), (c, c, c), -1)
-
-    def render(self, tracks):
+    def render(self, tracks, objects):
         self.img = np.zeros((self.height, self.width, 3), np.uint8)
         self.draw_coordinate_system()
         self.draw_cameras()
-        groups = self.make_groups(tracks)
         self.draw_history()
-        self.history.append(groups)
-        self.draw_groups(groups)
+        self.history.append(objects)
+        self.draw_objects(tracks, objects)
 
         cv2.imshow("Bird's Eye View", self.img)
         

@@ -1,56 +1,86 @@
+from dataclasses import dataclass
 import numpy as np
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
+@dataclass
 class Object:
-    def __init__(self, id):
-        self.mappings = set()
-        self.id = id
+    id: int
+    label: str
+    pos: np.ndarray
+    embedding: np.ndarray
+    age: int
 
 class ObjectList:
-    def __init__(self):
+    def __init__(self, max_age, alpha, max_dist=2, assoc_thresh=0.7):
         self.objects = []
-    
-    def find_obj_id(self, tracks):
-        id = None
+        self.max_age = max_age
+        self.alpha = alpha # factor for blending between old and new features
+        self.max_dist = max_dist
+        self.assoc_thresh = assoc_thresh
+        self.new_id = 0 # id to use on the newest object
+
+    def match_group_to_object(self, group_pos, group_embedding, group_label, active_objects):
+        if len(self.objects) == 0:
+            return self.create_obj(group_pos, group_embedding, group_label)
+        
+        probs = []
         for obj in self.objects:
-            for track in tracks:
-                if (track.track_id, track.others["device_id"]) in obj.mappings:
-                    id = obj.id
-                    return id
-        return id   
-
-    def add_obj_tracks(self, tracks, obj_id):
-        for track in tracks:
-            curr_pair = (track.track_id, track.others["device_id"])
-            self.objects[obj_id].mappings.add(curr_pair)
-            self.remove_from_others(obj_id, curr_pair)
-
-    def remove_from_others(self, obj_id, pair):
-        for i, obj in enumerate(self.objects):
-            if i == obj_id:
+            if obj.label != group_label:
+                probs.append(0)
                 continue
-            obj.mappings.discard(pair)
 
-    def new_obj(self, tracks):
-        new_id = len(self.objects)
-        new_obj = Object(new_id)
-        for track in tracks:
-            curr_pair = (track.track_id, track.others["device_id"])
-            new_obj.mappings.add(curr_pair)
-            self.remove_from_others(new_id, curr_pair)
+            curr_cos_sim = cos_similarity(obj.embedding, group_embedding)
+            curr_dist = euclidian_dist(obj.pos, group_pos)
+            curr_prob = curr_cos_sim + (1 - curr_dist/self.max_dist)
+            if curr_prob < self.assoc_thresh: curr_prob = 0
+            probs.append(curr_prob)
+
+        max_id = np.argmax(probs)
+        if probs[max_id] == 0: # create obj if no matches
+            obj = self.create_obj(group_pos, group_embedding, group_label)
+        else: 
+            obj = self.objects[max_id]
+            if obj in active_objects: # if matched obj already active then create new one
+                obj = self.create_obj(group_pos, group_embedding, group_label)
+            else:
+                self.update_obj(max_id, group_pos, group_embedding)
+
+        return obj
+
+    def update_obj(self, id, new_pos, new_embedding):
+        obj = self.objects[id]
+        obj.pos = new_pos
+        obj.embedding = (1-self.alpha)*obj.embedding + self.alpha*new_embedding
+
+    def create_obj(self, pos, embedding, label):
+        new_obj = Object(id=self.new_id, label=label, pos=pos, embedding=embedding, age=self.max_age)
+        print(f"New object created: {new_obj.label}_{new_obj.id}")
         self.objects.append(new_obj)
-        return new_id
+        self.new_id += 1
+        return new_obj
+
+    def update(self, active_objs):
+        to_remove = []
+        for obj in self.objects:
+            if obj in active_objs:
+                obj.age = self.max_age
+            else:
+                obj.age -= 1
+                if obj.age <= 0: to_remove.append(obj)
+        for obj in to_remove:
+            print(f"Object removed: {obj.label}_{obj.id}")
+            self.objects.remove(obj)
              
 
 class Tracker:
-    def __init__(self, devices, multi_cam_max_dist=2, multi_cam_assoc_coef=0.5, multi_cam_assoc_thresh=0.7, **kwargs):
+    def __init__(self, devices, multi_cam_max_dist=2, multi_cam_assoc_coef=0.5, multi_cam_assoc_thresh=0.7, max_age=100, alpha=0.1, **kwargs):
         self.devices = devices
         self.multi_cam_max_dist = multi_cam_max_dist # maximum euclidian distance between objects to be still considered same
         self.multi_cam_assoc_coef = multi_cam_assoc_coef # ratio between cosine similarity and euclidian distance (1=only cos sim, 0=only euclidian dist)
         self.multi_cam_assoc_thresh = multi_cam_assoc_thresh # threshold for min probability for objects to be still considered same
 
-        self.trackers = [(device_id, DeepSort(**kwargs)) for device_id in devices] # one DeepSort tracker per device
-        self.objects = ObjectList()
+        self.trackers = [(device_id, DeepSort(max_age=max_age, **kwargs)) for device_id in devices] # one DeepSort tracker per device
+        self.obj_list = ObjectList(max_age, alpha, multi_cam_max_dist, multi_cam_assoc_thresh)
         self.counter = 0
 
     def update(self, detections):
@@ -62,13 +92,54 @@ class Tracker:
 
         # filter out non active tracks
         active_tracks = [t for t in tracks if t.is_confirmed() and t.time_since_update == 0]
-        output = {device_id: [] for device_id in self.devices}
+        track_output = {device_id: [] for device_id in self.devices}
         if len(active_tracks) == 0:
-            return output
+            self.obj_list.update([]) # still update age of objects
+            return track_output, []
         
-        probs = self.find_probs_of_same_ids(active_tracks)
+        # 1 group == 1 real life object
+        groups = self.group_tracks(active_tracks)
+
+        # create output for each device
+        active_objects = []
+        for group in groups:
+            group_tracks = [active_tracks[i] for i in group]
+            group_label = group_tracks[0].det_class
+            # test = [t.det_class for t in group_tracks]
+            # print("TESTING LABELS", all(x==test[0] for x in test))
+            avg_pos, avg_embedding = self.calc_group_average(group_tracks)
+            curr_obj = self.obj_list.match_group_to_object(avg_pos, avg_embedding, group_label, active_objects)
+            active_objects.append(curr_obj)
+            for track in group_tracks:
+                track_output[track.others["device_id"]].append({
+                    "object_id": curr_obj.id,
+                    "device_id": track.others["device_id"],
+                    "bbox": track.to_ltrb(orig=True),
+                    "confidence": track.det_conf,
+                    "spatial_coords": track.others["spatial_coords"],
+                    "label": track.det_class,
+                    "pos": track.others["pos"],
+                })
+        
+        # update objs ages and remove non active ones
+        self.obj_list.update(active_objects)
+        return track_output, active_objects
+
+    def calc_group_average(self, tracks):
+        avg_pos = np.zeros_like(tracks[0].others["pos"])
+        avg_embedding = np.zeros_like(tracks[0].get_feature())         
+        for t in tracks:
+            avg_pos += t.others["pos"]
+            avg_embedding += t.get_feature()
+        avg_pos /= len(tracks)
+        avg_embedding /= len(tracks)
+        return avg_pos, avg_embedding
+
+
+    def group_tracks(self, tracks):
+        probs = self.find_probs_of_same_ids(tracks)
         probs[probs < self.multi_cam_assoc_thresh] = 0
-        print(probs)
+
         # for each track check associated tracks
         assoc_tracks = {}
         for i, prob in enumerate(probs):
@@ -78,10 +149,10 @@ class Tracker:
                 assoc_tracks[i].add(i)
             else: # if curr_max == 0 then this track is not associated with any other track from other cameras
                 assoc_tracks[i] = set([i])
-        print("assoc", assoc_tracks)
+
         # merge associated tracks into groups (1 group == 1 real life object)
         groups = []
-        for i in range(len(active_tracks)):
+        for i in range(len(tracks)):
             curr_set = assoc_tracks[i]
             joined = False
             for g in groups:
@@ -90,96 +161,9 @@ class Tracker:
                     joined = True
                     break
             if not joined:
-                groups.append(curr_set)
-
-        for g in groups:
-            group_tracks = [active_tracks[i] for i in g]
-            print("GROUPS", [(t.track_id, t.others["device_id"]) for t in group_tracks])
-        # print("BEFORE")
-        # print("----OBJS-----")
-        # for obj in self.objects.objects:
-        #     print(obj.id)
-        #     print(obj.mappings)
-        # print("----OBJS-----")
-
-        # print("------GROUPS-----")
-        # for i,g in enumerate(groups):
-        #     print("INDEX:", i)
-        #     print([(t.track_id, t.others["device_id"]) for t in [active_tracks[j] for j in g]])
-        # print("----GROUPS-----")
-
-        # assign object_id to groups
-        for group in groups:
-            group_tracks = [active_tracks[i] for i in group]
-            obj_id = self.objects.find_obj_id(group_tracks) # find if objects already exists
-            if obj_id != None:
-                # if objects exists all tracks in group have same object_id
-                self.objects.add_obj_tracks(group_tracks, obj_id)
-            else:
-                # if doesn't exists create new one and return new id
-                obj_id = self.objects.new_obj(group_tracks)
-
-            print("OBJ ID", obj_id, [(t.track_id, t.others["device_id"]) for t in group_tracks])
-            for track in group_tracks:
-                output[track.others["device_id"]].append({
-                    "object_id": obj_id,
-                    "device_id": track.others["device_id"],
-                    "bbox": track.to_ltrb(orig=True),
-                    "confidence": track.det_conf,
-                    "spatial_coords": track.others["spatial_coords"],
-                    "label": track.det_class,
-                    "pos": track.others["pos"],
-                })
-        print("-----")
-
-        # print("AFTER")
-        # print("----OBJS-----")
-        # for obj in self.objects.objects:
-        #     print(obj.id)
-        #     print(obj.mappings)
-        # print("----OBJS-----")
-
-        # print("------GROUPS-----")
-        # for i,g in enumerate(groups):
-        #     print("INDEX:", i)
-        #     print([(t.track_id, t.others["device_id"]) for t in [active_tracks[j] for j in g]])
-        # print("----GROUPS-----")
-
-        # if self.counter == 4:
-        #     import sys
-        #     sys.exit()
-
-        # self.counter += 1
-
-        # # return merged active tracks
-        # for i, g in enumerate(groups):
-        #     for track_id in g:
-        #         curr_track = active_tracks[track_id]
-        #         curr_device = curr_track.others["device_id"]
-
-        #         found = False
-        #         for obj in self.objects:
-        #             if (curr_track.track_id, curr_device) in obj.mappings:
-        #                 object_id = obj.id
-        #                 found = True
-        #                 break
-        #         if not found:
-        #             new_object = Object(len(self.objects))
-        #             new_object.add(curr_track.track_id, curr_device)
-        #             object_id = new_object.id
-        #             self.objects.append(new_object)
-
-        #         output[curr_device].append({
-        #             "object_id": object_id,
-        #             "device_id": curr_device,
-        #             "bbox": curr_track.to_ltrb(orig=True),
-        #             "confidence": curr_track.det_conf,
-        #             "spatial_coords": curr_track.others["spatial_coords"],
-        #             "label": curr_track.det_class,
-        #             "pos": curr_track.others["pos"],
-        #         })
+                groups.append(curr_set) 
         
-        return output
+        return groups
 
     def decode_detections(self, detections):
         dets = []
@@ -203,8 +187,8 @@ class Tracker:
 
         for i in range(n):
             for j in range(n):
-                cos_sim_mat[i,j] = self.cos_similarity(tracks[i].get_feature(), tracks[j].get_feature())
-                dist_mat[i,j] = np.linalg.norm(tracks[i].others["pos"] - tracks[j].others["pos"])
+                cos_sim_mat[i,j] = cos_similarity(tracks[i].get_feature(), tracks[j].get_feature())
+                dist_mat[i,j] = euclidian_dist(tracks[i].others["pos"], tracks[j].others["pos"])
                 if tracks[i].others["device_id"] == tracks[j].others["device_id"]: # if from same device than different object
                     cam_coef_mat[i,j] = 0
                 if tracks[i].det_class != tracks[j].det_class: # if different class than different object
@@ -223,9 +207,12 @@ class Tracker:
             (1-self.multi_cam_assoc_coef)*dist_mat)
         return result
 
-    @staticmethod
-    def cos_similarity(a, b):
-        denominator = np.linalg.norm(a) * np.linalg.norm(b)
-        if denominator == 0:
-            return np.nan
-        return np.dot(a, b) / denominator
+
+def cos_similarity(a, b):
+    denominator = np.linalg.norm(a) * np.linalg.norm(b)
+    if denominator == 0:
+        return np.nan
+    return np.dot(a, b) / denominator
+
+def euclidian_dist(a, b):
+    return np.linalg.norm(a-b)
