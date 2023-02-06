@@ -5,7 +5,6 @@ import json
 import time
 import numpy as np
 from typing import List
-# from depthai_sdk.fps import FPSHandler 
 
 from calibration import Calibration
 from detection import Detection
@@ -45,7 +44,6 @@ class Camera:
 
         self.calibration = Calibration((10, 7), 0.0251, self.device)
         self.sync = TwoStageHostSeqSync()
-        # self.fps_handler = FPSHandler()
 
         print("=== Connected to " + self.device_info.getMxId())
 
@@ -59,7 +57,7 @@ class Camera:
 
         # RGB cam -> 'color'
         cam_rgb = pipeline.create(dai.node.ColorCamera)
-        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K) # use THE_4_K for calibration
+        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P) # use THE_4_K for calibration
         # cam_rgb.setPreviewSize(640, 640)
         cam_rgb.setPreviewSize(300, 300)
         cam_rgb.setInterleaved(False)
@@ -77,7 +75,7 @@ class Camera:
         mono_right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
         mono_right.setBoardSocket(dai.CameraBoardSocket.RIGHT)
         cam_stereo = pipeline.create(dai.node.StereoDepth)
-        cam_stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+        # cam_stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
         cam_stereo.setDepthAlign(dai.CameraBoardSocket.RGB) # Align depth map to the perspective of RGB camera, on which inference is done
         cam_stereo.setOutputSize(mono_left.getResolutionWidth(), mono_left.getResolutionHeight())
         mono_left.out.link(cam_stereo.left)
@@ -227,28 +225,22 @@ class Camera:
 
     def update(self):
         queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.emb_queue]
-        # queues = [self.rgb_queue, self.nn_queue, self.depth_queue]
-        # msgs = {}
         for q in queues:
             data = q.tryGet()
             if data:
-                # msgs[q.getName()] = data
                 self.sync.add_msg(data, q.getName())
 
         msgs = self.sync.get_msgs()
         if msgs == None:
             self.frame_color = None
             self.frame_depth = None
-            # self.fps_handler.nextIter()
             return
-        # if len(msgs) != 3:
-        #     return
 
         self.frame_color = msgs["color"]
         self.frame_depth = msgs["depth"]
         
         detections = msgs["detection"].detections
-        embeddings = msgs["embedding"] #[np.ones(256) for _ in detections]
+        embeddings = msgs["embedding"]
 
         self.mapping = self.mapping_queue.tryGet()
         self.detected_objects = []
@@ -277,7 +269,6 @@ class Camera:
                             camera_friendly_id = self.friendly_id
                         )
                     )
-        # self.fps_handler.nextIter()
 
     def render_tracks(self, tracks):
         if self.show_detph:
@@ -319,9 +310,6 @@ class Camera:
                 cv2.putText(visualization, f"X: {int(det['spatial_coords'][0])} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
                 cv2.putText(visualization, f"Y: {int(det['spatial_coords'][1])} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
                 cv2.putText(visualization, f"Z: {int(det['spatial_coords'][2])} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-
-        # fps = self.fps_handler.fps()
-        # cv2.putText(visualization, f"Fps: {fps}", (5,15), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
 
         if self.show_video:
             cv2.imshow(self.window_name, visualization)
