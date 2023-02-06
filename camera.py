@@ -57,7 +57,7 @@ class Camera:
 
         # RGB cam -> 'color'
         cam_rgb = pipeline.create(dai.node.ColorCamera)
-        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P) # use THE_4_K for calibration
+        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K) # use THE_4_K for calibration
         # cam_rgb.setPreviewSize(640, 640)
         cam_rgb.setPreviewSize(300, 300)
         cam_rgb.setInterleaved(False)
@@ -201,7 +201,7 @@ class Camera:
 
         # Embedding nn -> 'embedding'
         embedding_nn = pipeline.create(dai.node.NeuralNetwork)
-        embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=6))
+        embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=4))
         # embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
         embedding_manip.out.link(embedding_nn.input)
         embedding_nn_xout = pipeline.create(dai.node.XLinkOut)
