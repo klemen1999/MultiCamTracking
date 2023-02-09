@@ -11,9 +11,14 @@ from calibration import Calibration
 from detection import Detection
 from multi_msg_sync import TwoStageHostSeqSync
 
+def frame_norm(frame, bbox):
+    normVals = np.full(len(bbox), frame.shape[0])
+    normVals[::2] = frame.shape[1]
+    return (np.clip(np.array(bbox), 0, 1) * normVals).astype(int)
+
 class Camera:
-    label_map = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
-        "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
+    # label_map = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
+    #     "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
 
 
     def __init__(self, device_info: dai.DeviceInfo, friendly_id: int, show_video: bool = True):
@@ -31,10 +36,9 @@ class Camera:
         self.mapping_queue = self.device.getOutputQueue(name="mapping", maxSize=1, blocking=False)
         self.nn_queue = self.device.getOutputQueue(name="detection", maxSize=1, blocking=False)
         self.depth_queue = self.device.getOutputQueue(name="depth", maxSize=1, blocking=False)
-        # self.emb_queue = self.device.getOutputQueue(name="embedding", maxSize=1, blocking=False)
 
         self.window_name = f"[{self.friendly_id}] Camera - mxid: {self.mxid}"
-        self.viz_height, self.viz_width = 360, 640
+        self.viz_height, self.viz_width = 540, 960
         if show_video:
             cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
             cv2.resizeWindow(self.window_name, self.viz_width, self.viz_height)
@@ -60,8 +64,8 @@ class Camera:
         # RGB cam -> 'color'
         cam_rgb = pipeline.create(dai.node.ColorCamera)
         cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K) # use THE_4_K for calibration
-        # cam_rgb.setPreviewSize(640, 640)
-        cam_rgb.setPreviewSize(300, 300)
+        cam_rgb.setPreviewSize(640, 640)
+        # cam_rgb.setPreviewSize(300, 300)
         cam_rgb.setInterleaved(False)
         cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
         cam_rgb.setPreviewKeepAspectRatio(False)
@@ -91,32 +95,30 @@ class Camera:
         xout_bounding_box_bepth_mapping.setStreamName("mapping")
         
         # Spatial detection network -> 'detection'
-        # with open("models/yolov6n.json", "r") as f:
-        #     data = json.load(f)
-        #     config = data["nn_config"]["NN_specific_metadata"]
-        #     self.label_map = data["mappings"]["labels"]
+        with open("models/yolov6n.json", "r") as f:
+            data = json.load(f)
+            config = data["nn_config"]["NN_specific_metadata"]
+            self.label_map = data["mappings"]["labels"]
 
-        # spatial_nn = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
-        # spatial_nn.setBlobPath("models/yolov6n.blob")
-        # spatial_nn.setConfidenceThreshold(config.get("confidence_threshold", {}))
-        # spatial_nn.setNumClasses(config.get("classes", {}))
-        # spatial_nn.setCoordinateSize(config.get("coordinates", {}))
-        # spatial_nn.setIouThreshold(config.get("iou_threshold", {}))
-        # spatial_nn.setAnchors(config.get("anchors", {}))
-        # spatial_nn.setAnchorMasks(config.get("anchor_masks", {}))
-        # spatial_nn.input.setBlocking(False)
-        # spatial_nn.setBoundingBoxScaleFactor(0.2)
-        # spatial_nn.setDepthLowerThreshold(100) # Min 10 centimeters
-        # spatial_nn.setDepthUpperThreshold(5000) # Max 5 meters
-        spatial_nn = pipeline.create(dai.node.MobileNetSpatialDetectionNetwork)
-        spatial_nn.setBlobPath(blobconverter.from_zoo(name='mobilenet-ssd', shaves=6))
-        spatial_nn.setConfidenceThreshold(0.6)
+        spatial_nn = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+        spatial_nn.setBlobPath("models/yolov6n.blob")
+        spatial_nn.setConfidenceThreshold(config.get("confidence_threshold", {}))
+        spatial_nn.setNumClasses(config.get("classes", {}))
+        spatial_nn.setCoordinateSize(config.get("coordinates", {}))
+        spatial_nn.setIouThreshold(config.get("iou_threshold", {}))
+        spatial_nn.setAnchors(config.get("anchors", {}))
+        spatial_nn.setAnchorMasks(config.get("anchor_masks", {}))
         spatial_nn.input.setBlocking(False)
         spatial_nn.setBoundingBoxScaleFactor(0.2)
-        spatial_nn.setDepthLowerThreshold(100)
-        spatial_nn.setDepthUpperThreshold(5000)
-        # xout_nn = pipeline.create(dai.node.XLinkOut)
-        # xout_nn.setStreamName("nn")
+        spatial_nn.setDepthLowerThreshold(100) # Min 10 centimeters
+        spatial_nn.setDepthUpperThreshold(5000) # Max 5 meters
+        # spatial_nn = pipeline.create(dai.node.MobileNetSpatialDetectionNetwork)
+        # spatial_nn.setBlobPath(blobconverter.from_zoo(name='mobilenet-ssd', shaves=6))
+        # spatial_nn.setConfidenceThreshold(0.6)
+        # spatial_nn.input.setBlocking(False)
+        # spatial_nn.setBoundingBoxScaleFactor(0.2)
+        # spatial_nn.setDepthLowerThreshold(100)
+        # spatial_nn.setDepthUpperThreshold(5000)
 
         xout_nn = pipeline.create(dai.node.XLinkOut)
         xout_nn.setStreamName("detection")
@@ -144,21 +146,13 @@ class Camera:
         self.pipeline = pipeline
 
     def update(self):
-        #queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.emb_queue]
         queues = [self.rgb_queue, self.nn_queue, self.depth_queue]
         msgs = {}
         for q in queues:
             data = q.tryGet()
             if data:
                 msgs[q.getName()] = data
-                # self.sync.add_msg(data, q.getName())
 
-        # msgs = self.sync.get_msgs()
-        # if msgs == None:
-        #     self.frame_color = None
-        #     self.frame_depth = None
-        #     # self.fps_handler.nextIter()
-        #     return
         if len(msgs) != 3:
             return
 
@@ -166,17 +160,14 @@ class Camera:
         self.frame_depth = msgs["depth"]
         
         detections = msgs["detection"].detections
-        embeddings = self.get_embeddings(self.frame_color.getCvFrame(), detections)
-        #embeddings = [np.ones(256) for _ in detections] #msgs["embedding"]
 
         self.mapping = self.mapping_queue.tryGet()
         self.detected_objects = []
 
         if len(detections) > 0 and self.mapping is not None:
-            for detection, embedding in zip(detections, embeddings):
-                # embedding = np.array(embedding.getFirstLayerFp16())
-                if np.all((embedding==0)):
-                    embedding[0] = 1
+            cv_frame_color = self.frame_color.getCvFrame()
+
+            for detection in detections:
                 try:
                     label = self.label_map[detection.label]
                 except:
@@ -188,11 +179,11 @@ class Camera:
 
                     self.detected_objects.append(
                         Detection(
-                            bbox = np.array([detection.xmin, detection.ymin, detection.xmax, detection.ymax]),
+                            bbox = frame_norm(cv_frame_color, (detection.xmin, detection.ymin, detection.xmax, detection.ymax)),
                             confidence = detection.confidence,
                             label = label,
+                            frame = cv_frame_color,
                             pos = pos_world_frame,
-                            embedding = embedding,
                             spatial_coords = np.array([detection.spatialCoordinates.x, detection.spatialCoordinates.y, detection.spatialCoordinates.z]),
                             camera_friendly_id = self.friendly_id
                         )
@@ -227,10 +218,12 @@ class Camera:
                 xmax = int(bottom_right.x)
                 ymax = int(bottom_right.y)
 
-                x1 = int(det["bbox"][0] * self.viz_width)
-                x2 = int(det["bbox"][2] * self.viz_width)
-                y1 = int(det["bbox"][1] * self.viz_height)
-                y2 = int(det["bbox"][3] * self.viz_height)
+                scale_x = self.viz_width / 640
+                scale_y = self.viz_height / 640
+                x1 = int(det["bbox"][0]*scale_x)
+                x2 = int(det["bbox"][2]*scale_x)
+                y1 = int(det["bbox"][1]*scale_y)
+                y2 = int(det["bbox"][3]*scale_y)
 
                 cv2.rectangle(visualization, (xmin, ymin), (xmax, ymax), (100, 0, 0), 2)
                 cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)
@@ -284,21 +277,3 @@ class Camera:
             cv2.waitKey()
 
         return still_rgb
-
-    def get_embeddings(self, frame, detections):
-        embeddings = []
-        W, H = frame.shape[:2]
-        for det in detections:
-            x1 = int(det.xmin * W)
-            x2 = int(det.xmax * W)
-            y1 = int(det.ymin * H)
-            y2 = int(det.ymax * H)
-            # print(x1, x2, y1, y2)
-            box = frame[x1:x2, y1:y2, :]
-            embedding = []
-            for i in range(3):
-                hist,bins = np.histogram(box[:,:,i], bins=range(0,256))
-                embedding.extend(hist)
-
-            embeddings.append(np.array(embedding))
-        return embeddings

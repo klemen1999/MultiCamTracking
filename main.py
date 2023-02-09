@@ -1,11 +1,13 @@
 import cv2
 import time
 import depthai as dai
+import argparse
 from birdseyeview import BirdsEyeView
 from camera import Camera
 from typing import List
 from tracker import Tracker
 from multi_camera_sync import MultiCameraSync
+
 
 device_infos = dai.Device.getAllAvailableDevices()
 if len(device_infos) == 0:
@@ -43,9 +45,9 @@ multi_cam_sync = MultiCameraSync(devices, 0.05)
 tracker = Tracker(
     devices = devices,
     multi_cam_max_dist=2,
-    multi_cam_assoc_coef=0.2, #0.5 
+    multi_cam_assoc_coef=0.5, #0.5 
     multi_cam_assoc_thresh=0.7,
-    embedder=None,
+    embedder="mobilenet",
     max_age=1000,
     nms_max_overlap=1,
 )

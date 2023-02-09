@@ -86,8 +86,11 @@ class Tracker:
     def update(self, detections):
         tracks = []
         for device_id, tracker in self.trackers:
-            curr_dets, curr_embeds, others = self.decode_detections(detections[device_id]["detections"])
-            curr_tracks = tracker.update_tracks(curr_dets, embeds=curr_embeds, others=others)
+            curr_dets, curr_frames, others = self.decode_detections(detections[device_id]["detections"])
+            frame = np.zeros((300,300,3)) # temporary frame
+            if len(curr_dets) > 0:
+                frame = curr_frames[0]
+            curr_tracks = tracker.update_tracks(curr_dets, frame=frame, others=others)
             tracks.extend(curr_tracks)
 
         # filter out non active tracks
@@ -105,8 +108,6 @@ class Tracker:
         for group in groups:
             group_tracks = [active_tracks[i] for i in group]
             group_label = group_tracks[0].det_class
-            # test = [t.det_class for t in group_tracks]
-            # print("TESTING LABELS", all(x==test[0] for x in test))
             avg_pos, avg_embedding = self.calc_group_average(group_tracks)
             curr_obj = self.obj_list.match_group_to_object(avg_pos, avg_embedding, group_label, active_objects)
             active_objects.append(curr_obj)
@@ -167,17 +168,17 @@ class Tracker:
 
     def decode_detections(self, detections):
         dets = []
-        embeds = []
+        frames = []
         others = []
         for detection in detections:
             dets.append([detection.bbox_to_ltwh(), detection.confidence, detection.label])
-            embeds.append(detection.embedding)
+            frames.append(detection.frame)
             others.append({
                 "device_id": detection.camera_friendly_id,
                 "pos": detection.pos,
                 "spatial_coords": detection.spatial_coords
             })
-        return dets, embeds, others
+        return dets, frames, others
 
     def find_probs_of_same_ids(self, tracks):
         n = len(tracks)
