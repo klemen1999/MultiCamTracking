@@ -57,7 +57,7 @@ class Camera:
 
         # RGB cam -> 'color'
         cam_rgb = pipeline.create(dai.node.ColorCamera)
-        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K) # use THE_4_K for calibration
+        cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P) # use THE_4_K for calibration
         # cam_rgb.setPreviewSize(640, 640)
         cam_rgb.setPreviewSize(300, 300)
         cam_rgb.setInterleaved(False)
