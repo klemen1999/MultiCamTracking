@@ -1,7 +1,6 @@
 # Multi camera tracking
 This example demonstrates calibration and tracking with multiple Luxonis OAK cameras. Position of each object in then shown in bird's-eye view. 
 
-![](img/demo.gif)
 ## Controls
 | key 			| action
 | :---			| :---			|
@@ -12,11 +11,7 @@ This example demonstrates calibration and tracking with multiple Luxonis OAK cam
 
 
 ## Usage
-1. Install [deep-sort-realtime](https://github.com/levan92/deep_sort_realtime) tracker: 
-    ```
-    pip install -e deep_sort_realtime
-    ```
-2. Run demo: 
+1. Run demo: 
     ``` 
     python3 main.py
     ```
@@ -31,3 +26,4 @@ Press the `p` key to estimate the pose of the camera. An overlay showing the coo
 When a camera's pose is measured, it will appear in the bird's-eye view along with its detected objects.
 
 ![bird's-eye view](img/birdseye.png)
+
