@@ -183,8 +183,8 @@ class Camera:
                     correct_bb(det)
                     cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
                     # node.warn(f"Sending {i + 1}. age/gender det. Seq {seq}. Det {det.xmin}, {det.ymin}, {det.xmax}, {det.ymax}")
-                    # cfg.setResize(224, 224)
-                    cfg.setResize(128, 256)
+                    cfg.setResize(224, 224)
+                    # cfg.setResize(128, 256)
                     cfg.setKeepAspectRatio(False)
                     node.io['manip_cfg'].send(cfg)
                     node.io['manip_img'].send(img)
@@ -192,8 +192,8 @@ class Camera:
 
         # Embedding manip -> resize for embedding
         embedding_manip = pipeline.create(dai.node.ImageManip)
-        # embedding_manip.initialConfig.setResize(224, 224)
-        embedding_manip.initialConfig.setResize(128, 256)
+        embedding_manip.initialConfig.setResize(224, 224)
+        # embedding_manip.initialConfig.setResize(128, 256)
         embedding_manip.initialConfig.setFrameType(dai.RawImgFrame.Type.BGR888p)
         embedding_manip.setWaitForConfigInput(True)
         image_manip_script.outputs['manip_cfg'].link(embedding_manip.inputConfig)
@@ -201,8 +201,8 @@ class Camera:
 
         # Embedding nn -> 'embedding'
         embedding_nn = pipeline.create(dai.node.NeuralNetwork)
-        embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=4))
-        # embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
+        # embedding_nn.setBlobPath(blobconverter.from_zoo(name="person-reidentification-retail-0288", shaves=4))
+        embedding_nn.setBlobPath(blobconverter.from_zoo(name="mobilenetv2_imagenet_embedder_224x224", zoo_type="depthai", shaves=6))
         embedding_manip.out.link(embedding_nn.input)
         embedding_nn_xout = pipeline.create(dai.node.XLinkOut)
         embedding_nn_xout.setStreamName("embedding")

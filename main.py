@@ -39,11 +39,11 @@ def select_camera(friendly_id: int):
 select_camera(1)
 
 devices = [c.friendly_id for c in cameras]
-multi_cam_sync = MultiCameraSync(devices, 0.05)
+multi_cam_sync = MultiCameraSync(devices, 0.01)
 tracker = Tracker(
     devices = devices,
     multi_cam_max_dist=2,
-    multi_cam_assoc_coef=0.3, #0.5 
+    multi_cam_assoc_coef=0.7, #0.5 
     multi_cam_assoc_thresh=0.7,
     embedder=None,
     max_age=1000,
