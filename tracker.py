@@ -109,6 +109,7 @@ class Tracker:
                 track_output[track.device_id].append({
                     "object_id": curr_obj.id,
                     "device_id": track.device_id,
+                    "dai_tracklet": track.dai_tracklet,
                     "pos": track.pos,
                 })
         

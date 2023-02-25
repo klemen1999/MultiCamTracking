@@ -284,7 +284,8 @@ class Camera:
 
         visualization = cv2.resize(visualization, (self.viz_width, self.viz_height), interpolation = cv2.INTER_NEAREST)
 
-        for t in tracks:
+        for track in tracks:
+            t = track["dai_tracklet"]
             roi = t.roi.denormalize(visualization.shape[1], visualization.shape[0])
             x1 = int(roi.topLeft().x)
             y1 = int(roi.topLeft().y)
@@ -294,7 +295,7 @@ class Camera:
             label_str = self.label_map[t.label]
 
             cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)
-            cv2.putText(visualization, f"{label_str}_{t['object_id']}", (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+            cv2.putText(visualization, f"{label_str}_{track['object_id']}", (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
             cv2.putText(visualization, f"X: {int(t.spatialCoordinates.x)} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
             cv2.putText(visualization, f"Y: {int(t.spatialCoordinates.y)} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
             cv2.putText(visualization, f"Z: {int(t.spatialCoordinates.z)} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
