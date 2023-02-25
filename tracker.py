@@ -79,46 +79,37 @@ class Tracker:
         self.multi_cam_assoc_coef = multi_cam_assoc_coef # ratio between cosine similarity and euclidian distance (1=only cos sim, 0=only euclidian dist)
         self.multi_cam_assoc_thresh = multi_cam_assoc_thresh # threshold for min probability for objects to be still considered same
 
-        self.trackers = [(device_id, DeepSort(max_age=max_age, **kwargs)) for device_id in devices] # one DeepSort tracker per device
         self.obj_list = ObjectList(max_age, alpha, multi_cam_max_dist, multi_cam_assoc_thresh)
         self.counter = 0
 
-    def update(self, detections):
-        tracks = []
-        for device_id, tracker in self.trackers:
-            curr_dets, curr_embeds, others = self.decode_detections(detections[device_id]["detections"])
-            curr_tracks = tracker.update_tracks(curr_dets, embeds=curr_embeds, others=others)
-            tracks.extend(curr_tracks)
+    def update(self, tracks):
+        tracks_flat = []
+        for device_id in tracks:
+            tracks_flat.extend(tracks[device_id]["tracks"])
 
-        # filter out non active tracks
-        active_tracks = [t for t in tracks if t.is_confirmed() and t.time_since_update == 0]
         track_output = {device_id: [] for device_id in self.devices}
-        if len(active_tracks) == 0:
+        if len(tracks_flat) == 0:
             self.obj_list.update([]) # still update age of objects
             return track_output, []
         
         # 1 group == 1 real life object
-        groups = self.group_tracks(active_tracks)
+        groups = self.group_tracks(tracks_flat)
 
         # create output for each device
         active_objects = []
         for group in groups:
-            group_tracks = [active_tracks[i] for i in group]
-            group_label = group_tracks[0].det_class
+            group_tracks = [tracks_flat[i] for i in group]
+            group_label = group_tracks[0].dai_tracklet.label
             # test = [t.det_class for t in group_tracks]
             # print("TESTING LABELS", all(x==test[0] for x in test))
             avg_pos, avg_embedding = self.calc_group_average(group_tracks)
             curr_obj = self.obj_list.match_group_to_object(avg_pos, avg_embedding, group_label, active_objects)
             active_objects.append(curr_obj)
             for track in group_tracks:
-                track_output[track.others["device_id"]].append({
+                track_output[track.device_id].append({
                     "object_id": curr_obj.id,
-                    "device_id": track.others["device_id"],
-                    "bbox": track.to_ltrb(orig=True),
-                    "confidence": track.det_conf,
-                    "spatial_coords": track.others["spatial_coords"],
-                    "label": track.det_class,
-                    "pos": track.others["pos"],
+                    "device_id": track.device_id,
+                    "pos": track.pos,
                 })
         
         # update objs ages and remove non active ones
@@ -126,11 +117,11 @@ class Tracker:
         return track_output, active_objects
 
     def calc_group_average(self, tracks):
-        avg_pos = np.zeros_like(tracks[0].others["pos"])
-        avg_embedding = np.zeros_like(tracks[0].get_feature())         
+        avg_pos = np.zeros_like(tracks[0].pos)
+        avg_embedding = np.zeros_like(tracks[0].embedding)         
         for t in tracks:
-            avg_pos += t.others["pos"]
-            avg_embedding += t.get_feature()
+            avg_pos += t.pos
+            avg_embedding += t.embedding
         avg_pos /= len(tracks)
         avg_embedding /= len(tracks)
         return avg_pos, avg_embedding
@@ -184,14 +175,13 @@ class Tracker:
         cos_sim_mat = np.zeros((n,n)) # cosine similarity between objects features
         dist_mat = np.zeros((n,n)) # distance between tracks in real space
         cam_coef_mat = np.ones((n,n)) # 0 means different object
-
         for i in range(n):
             for j in range(n):
-                cos_sim_mat[i,j] = cos_similarity(tracks[i].get_feature(), tracks[j].get_feature())
-                dist_mat[i,j] = euclidian_dist(tracks[i].others["pos"], tracks[j].others["pos"])
-                if tracks[i].others["device_id"] == tracks[j].others["device_id"]: # if from same device than different object
+                cos_sim_mat[i,j] = cos_similarity(tracks[i].embedding, tracks[j].embedding)
+                dist_mat[i,j] = euclidian_dist(tracks[i].pos, tracks[j].pos)
+                if tracks[i].device_id == tracks[j].device_id: # if from same device than different object
                     cam_coef_mat[i,j] = 0
-                if tracks[i].det_class != tracks[j].det_class: # if different class than different object
+                if tracks[i].dai_tracklet.label != tracks[j].dai_tracklet.label: # if different class than different object
                     cam_coef_mat[i,j] = 0
 
         # normalize distances between 0 and max value

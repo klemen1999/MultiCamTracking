@@ -7,7 +7,7 @@ import numpy as np
 from typing import List
 
 from calibration import Calibration
-from detection import Detection
+from tracklet import Tracklet
 from multi_msg_sync import TwoStageHostSeqSync
 
 class Camera:
@@ -27,8 +27,7 @@ class Camera:
         self.rgb_queue = self.device.getOutputQueue(name="color", maxSize=1, blocking=False)
         self.still_queue = self.device.getOutputQueue(name="still", maxSize=1, blocking=False)
         self.control_queue = self.device.getInputQueue(name="control")
-        self.mapping_queue = self.device.getOutputQueue(name="mapping", maxSize=1, blocking=False)
-        self.nn_queue = self.device.getOutputQueue(name="detection", maxSize=1, blocking=False)
+        self.tracks_queue = self.device.getOutputQueue(name="tracks", maxSize=1, blocking=False)
         self.depth_queue = self.device.getOutputQueue(name="depth", maxSize=1, blocking=False)
         self.emb_queue = self.device.getOutputQueue(name="embedding", maxSize=1, blocking=False)
 
@@ -40,7 +39,7 @@ class Camera:
 
         self.frame_color = None
         self.frame_depth = None
-        self.detected_objects: List[Detection] = []
+        self.curr_tracklets: List[Tracklet] = []
 
         self.calibration = Calibration((10, 7), 0.0251, self.device)
         self.sync = TwoStageHostSeqSync()
@@ -64,8 +63,6 @@ class Camera:
         cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
         cam_rgb.setPreviewKeepAspectRatio(False)
         cam_rgb.setPreviewNumFramesPool(30)
-        xout_rgb = pipeline.createXLinkOut()
-        xout_rgb.setStreamName("color")
 
         # Depth cam -> 'depth'
         mono_left = pipeline.create(dai.node.MonoCamera)
@@ -81,13 +78,7 @@ class Camera:
         mono_left.out.link(cam_stereo.left)
         mono_right.out.link(cam_stereo.right)
 
-        xout_depth = pipeline.create(dai.node.XLinkOut)
-        xout_depth.setStreamName("depth")
 
-        # Bounding box maping from depth to RGB -> 'mapping'
-        xout_bounding_box_bepth_mapping = pipeline.create(dai.node.XLinkOut)
-        xout_bounding_box_bepth_mapping.setStreamName("mapping")
-        
         # Spatial detection network -> 'detection'
         # with open("models/yolov6n.json", "r") as f:
         #     data = json.load(f)
@@ -114,21 +105,34 @@ class Camera:
         spatial_nn.setDepthLowerThreshold(100)
         spatial_nn.setDepthUpperThreshold(5000)
 
-        xout_nn = pipeline.create(dai.node.XLinkOut)
-        xout_nn.setStreamName("detection")
-
         cam_rgb.preview.link(spatial_nn.input)
         cam_stereo.depth.link(spatial_nn.inputDepth)
-        spatial_nn.passthrough.link(xout_rgb.input)
+        
+        xout_depth = pipeline.create(dai.node.XLinkOut)
+        xout_depth.setStreamName("depth")
         spatial_nn.passthroughDepth.link(xout_depth.input)
-        spatial_nn.boundingBoxMapping.link(xout_bounding_box_bepth_mapping.input)
-        spatial_nn.out.link(xout_nn.input)
 
-        # Image manip -> crop detections
+        # Object Tracker
+        object_tracker = pipeline.create(dai.node.ObjectTracker)
+        object_tracker.setTrackerType(dai.TrackerType.ZERO_TERM_COLOR_HISTOGRAM)
+        object_tracker.setTrackerIdAssignmentPolicy(dai.TrackerIdAssignmentPolicy.UNIQUE_ID)
+        spatial_nn.passthrough.link(object_tracker.inputTrackerFrame)
+        spatial_nn.passthrough.link(object_tracker.inputDetectionFrame)
+        spatial_nn.out.link(object_tracker.inputDetections)
+        
+        xout_rgb = pipeline.createXLinkOut()
+        xout_rgb.setStreamName("color")
+        object_tracker.passthroughTrackerFrame.link(xout_rgb.input)
+
+        xout_nn = pipeline.create(dai.node.XLinkOut)
+        xout_nn.setStreamName("tracks")
+        object_tracker.out.link(xout_nn.input)
+
+        # Image manip -> crop tracks
         image_manip_script = pipeline.create(dai.node.Script)
-        cam_rgb.preview.link(image_manip_script.inputs["preview"])
-        spatial_nn.out.link(image_manip_script.inputs["dets_in"])
-
+        object_tracker.passthroughTrackerFrame.link(image_manip_script.inputs["preview"])
+        object_tracker.out.link(image_manip_script.inputs["tracks_in"])
+        
         image_manip_script.setScript("""
         import time
         msgs = dict()
@@ -152,37 +156,37 @@ class Camera:
             for seq, syncMsgs in msgs.items():
                 seq_remove.append(seq) # Will get removed from dict if we find synced msgs pair
                 # node.warn(f"Checking sync {seq}")
-                # Check if we have both detections and color frame with this sequence number
-                if len(syncMsgs) == 2: # 1 frame, 1 detection
+                # Check if we have both tracks and color frame with this sequence number
+                if len(syncMsgs) == 2: # 1 frame, 1 track
                     for rm in seq_remove:
                         del msgs[rm]
                     # node.warn(f"synced {seq}. Removed older sync values. len {len(msgs)}")
                     return syncMsgs # Returned synced msgs
             return None
         def correct_bb(bb):
-            if bb.xmin < 0: bb.xmin = 0.001
-            if bb.ymin < 0: bb.ymin = 0.001
-            if bb.xmax > 1: bb.xmax = 0.999
-            if bb.ymax > 1: bb.ymax = 0.999
+            if bb.topLeft().x < 0: bb.topLeft().x = 0.001
+            if bb.topLeft().y < 0: bb.topLeft().y = 0.001
+            if bb.bottomRight().x > 1: bb.bottomRight().x = 0.999
+            if bb.bottomRight().y > 1: bb.bottomRight().y = 0.999
             return bb
         while True:
             time.sleep(0.001) # Avoid lazy looping
             preview = node.io['preview'].tryGet()
             if preview is not None:
                 add_msg(preview, 'preview')
-            dets = node.io['dets_in'].tryGet()
-            if dets is not None:
-                seq = dets.getSequenceNum()
-                add_msg(dets, 'dets', seq)
+            tracks = node.io['tracks_in'].tryGet()
+            if tracks is not None:
+                seq = tracks.getSequenceNum()
+                add_msg(tracks, 'tracks', seq)
             sync_msgs = get_msgs()
             if sync_msgs is not None:
                 img = sync_msgs['preview']
-                dets = sync_msgs['dets']
-                for i, det in enumerate(dets.detections):
+                tracks = sync_msgs['tracks']
+                for tracklet in tracks.tracklets:
                     cfg = ImageManipConfig()
-                    correct_bb(det)
-                    cfg.setCropRect(det.xmin, det.ymin, det.xmax, det.ymax)
-                    # node.warn(f"Sending {i + 1}. age/gender det. Seq {seq}. Det {det.xmin}, {det.ymin}, {det.xmax}, {det.ymax}")
+                    # correct_bb(tracklet.roi)
+                    cfg.setCropRect(tracklet.roi.topLeft().x, tracklet.roi.topLeft().y, 
+                        tracklet.roi.bottomRight().x, tracklet.roi.bottomRight().y)
                     cfg.setResize(224, 224)
                     # cfg.setResize(128, 256)
                     cfg.setKeepAspectRatio(False)
@@ -224,7 +228,7 @@ class Camera:
         self.pipeline = pipeline
 
     def update(self):
-        queues = [self.rgb_queue, self.nn_queue, self.depth_queue, self.emb_queue]
+        queues = [self.rgb_queue, self.tracks_queue, self.depth_queue, self.emb_queue]
         for q in queues:
             data = q.tryGet()
             if data:
@@ -239,34 +243,28 @@ class Camera:
         self.frame_color = msgs["color"]
         self.frame_depth = msgs["depth"]
         
-        detections = msgs["detection"].detections
+        tracklets = msgs["tracks"].tracklets
         embeddings = msgs["embedding"]
 
-        self.mapping = self.mapping_queue.tryGet()
-        self.detected_objects = []
+        self.curr_tracklets = []
 
-        if len(detections) > 0 and self.mapping is not None:
-            for detection, embedding in zip(detections, embeddings):
+        if len(tracklets):
+            for tracklet, embedding in zip(tracklets, embeddings):
+                if tracklet.status.name not in ["TRACKED", "NEW"]:
+                    continue
+
                 embedding = np.array(embedding.getFirstLayerFp16())
 
-                try:
-                    label = self.label_map[detection.label]
-                except:
-                    label = detection.label
-
                 if self.calibration.cam_to_world is not None:
-                    pos_camera_frame = np.array([[detection.spatialCoordinates.x / 1000, -detection.spatialCoordinates.y / 1000, detection.spatialCoordinates.z / 1000, 1]]).T
+                    pos_camera_frame = np.array([[tracklet.spatialCoordinates.x / 1000, -tracklet.spatialCoordinates.y / 1000, tracklet.spatialCoordinates.z / 1000, 1]]).T
                     pos_world_frame = self.calibration.cam_to_world @ pos_camera_frame
 
-                    self.detected_objects.append(
-                        Detection(
-                            bbox = np.array([detection.xmin, detection.ymin, detection.xmax, detection.ymax]),
-                            confidence = detection.confidence,
-                            label = label,
-                            pos = pos_world_frame,
-                            embedding = embedding,
-                            spatial_coords = np.array([detection.spatialCoordinates.x, detection.spatialCoordinates.y, detection.spatialCoordinates.z]),
-                            camera_friendly_id = self.friendly_id
+                    self.curr_tracklets.append(
+                        Tracklet(
+                            dai_tracklet=tracklet,
+                            embedding=embedding,
+                            pos=pos_world_frame,
+                            device_id=self.friendly_id
                         )
                     )
 
@@ -286,30 +284,20 @@ class Camera:
 
         visualization = cv2.resize(visualization, (self.viz_width, self.viz_height), interpolation = cv2.INTER_NEAREST)
 
-        if len(tracks) > 0 and self.mapping is not None:
-            roi_datas = self.mapping.getConfigData()
-            for roi_data, det in zip(roi_datas, tracks):
-                roi = roi_data.roi
-                roi = roi.denormalize(self.viz_width, self.viz_height)
-                top_left = roi.topLeft()
-                bottom_right = roi.bottomRight()
-                xmin = int(top_left.x)
-                ymin = int(top_left.y)
-                xmax = int(bottom_right.x)
-                ymax = int(bottom_right.y)
+        for t in tracks:
+            roi = t.roi.denormalize(visualization.shape[1], visualization.shape[0])
+            x1 = int(roi.topLeft().x)
+            y1 = int(roi.topLeft().y)
+            x2 = int(roi.bottomRight().x)
+            y2 = int(roi.bottomRight().y)
 
-                x1 = int(det["bbox"][0] * self.viz_width)
-                x2 = int(det["bbox"][2] * self.viz_width)
-                y1 = int(det["bbox"][1] * self.viz_height)
-                y2 = int(det["bbox"][3] * self.viz_height)
+            label_str = self.label_map[t.label]
 
-                cv2.rectangle(visualization, (xmin, ymin), (xmax, ymax), (100, 0, 0), 2)
-                cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                cv2.putText(visualization, str(det["label"])+f"_{det['object_id']}", (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, "{:.2f}".format(det["confidence"]*100), (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, f"X: {int(det['spatial_coords'][0])} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, f"Y: {int(det['spatial_coords'][1])} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
-                cv2.putText(visualization, f"Z: {int(det['spatial_coords'][2])} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+            cv2.rectangle(visualization, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            cv2.putText(visualization, f"{label_str}_{t['object_id']}", (x1 + 10, y1 + 20), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+            cv2.putText(visualization, f"X: {int(t.spatialCoordinates.x)} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+            cv2.putText(visualization, f"Y: {int(t.spatialCoordinates.y)} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
+            cv2.putText(visualization, f"Z: {int(t.spatialCoordinates.z)} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.5, 255)
 
         if self.show_video:
             cv2.imshow(self.window_name, visualization)

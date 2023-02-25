@@ -78,7 +78,7 @@ while True:
         if camera.frame_color:
             multi_cam_sync.add_msg({
                 "timestamp": camera.frame_color.getTimestamp(), 
-                "detections": camera.detected_objects
+                "tracks": camera.curr_tracklets
             }, camera.friendly_id)
    
     msgs = multi_cam_sync.get_msgs()

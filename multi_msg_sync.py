@@ -1,15 +1,15 @@
-# Color frames (ImgFrame), object detection (ImgDetections) and embedding (NNData)
+# Color frames (ImgFrame), object tracks (Tracklets) and embedding (NNData)
 # messages arrive to the host all with some additional delay.
-# For each ImgFrame there's one ImgDetections msg, which has multiple detections, and for each
-# detection there's a NNData msg which contains embedding results.
+# For each ImgFrame there's one Tracklets msg, which has multiple tracklets, and for each
+# tracklet there's a NNData msg which contains embedding results.
 
 # How it works:
-# Every ImgFrame, ImgDetections and NNData message has it's own sequence number, by which we can sync messages.
+# Every ImgFrame, Tracklets and NNData message has it's own sequence number, by which we can sync messages.
 
 class TwoStageHostSeqSync:
     def __init__(self):
         self.msgs = {}
-    # name: color, detection, or embedding
+    # name: color, tracks, or embedding
     def add_msg(self, msg, name):
         seq = str(msg.getSequenceNum())
         if seq not in self.msgs:
@@ -22,11 +22,11 @@ class TwoStageHostSeqSync:
             self.msgs[seq]["embedding"].append(msg)
             # print(f'Added embedding seq {seq}, total len {len(self.msgs[seq]["embedding"])}')
 
-        elif name == "detection":
-            # Save detection msg in the directory
+        elif name == "tracks":
+            # Save tracks msg in the directory
             self.msgs[seq][name] = msg
-            self.msgs[seq]["len"] = len(msg.detections)
-            # print(f'Added detection seq {seq}')
+            self.msgs[seq]["len"] = len(msg.tracklets)
+            # print(f'Added tracks seq {seq}')
 
         elif name == "color" or name == "depth": # color
             # Save frame in the directory
@@ -41,7 +41,7 @@ class TwoStageHostSeqSync:
         for seq, msgs in self.msgs.items():
             seq_remove.append(seq) # Will get removed from dict if we find synced msgs pair
 
-            # Check if we have detections, color and depth frame with this sequence number
+            # Check if we have tracks, color and depth frame with this sequence number
             if "color" in msgs and "depth" in msgs and "len" in msgs:
 
                 # Check if all detected objects (faces) have finished embedding inference
